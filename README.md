@@ -3,7 +3,7 @@
 
 #### A bridge between the high-speed data of 2026 and the low-resolution, "Mode 7" broadcast aesthetic of the 1990s.
 
-_Customise and view your favourite RSS feeds with no distracting ads._
+_Customise and aggregate your favourite RSS sources without bloat or distracting ads._
 
 
 <img width="1754" height="959" alt="image" src="https://github.com/user-attachments/assets/4b79290e-e74f-4fbc-90a2-a05c11462fb8" />
