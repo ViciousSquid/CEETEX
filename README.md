@@ -1,4 +1,4 @@
-# Ceetex
+# CEETEX
 #### Teletext/Ceefax Emulator for modern web feeds
 
 a bridge between the high-speed data of 2026 and the low-resolution, "Mode 7" broadcast aesthetic of the 1990s.
