@@ -10,7 +10,7 @@ _Customise and aggregate your favourite RSS sources without bloat or distracting
 
 -------------------------------
 
-Ceetex is a Python-based RSS reader that reimagines modern data through the high-density, no-nonsense lens of 1980s Teletext. Built using the Textual framework, it features a retro 3-digit dialing system and a custom engine that strips away web bloat, delivering a distraction-free, terminal-native news experience."
+CEETEX is a Python-based RSS reader that reimagines modern data through the high-density, no-nonsense lens of 1980s Teletext. Built using the Textual framework, it features a retro 3-digit dialing system and a custom engine that strips away web bloat, delivering a distraction-free, terminal-native news experience."
 
 -------------------------------
 
