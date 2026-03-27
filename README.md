@@ -12,6 +12,8 @@ _Customise and aggregate your favourite RSS sources without bloat or distracting
 
 CEETEX is a Python-based RSS reader that reimagines modern data through the high-density, no-nonsense lens of 1980s Teletext. Built using the Textual framework, it features a retro 3-digit dialing system and a custom engine that strips away web bloat, delivering a distraction-free, terminal-native news experience."
 
+"CEETEX brings back the 'information-at-your-fingertips' era of broadcast data services like the UK's Ceefax and Australia's Austext. For those in the US, think of it as a interactive, user-controlled version of the classic 80s Weather Channel dashboard. It’s a nostalgic, high-density way to browse the modern web via the terminal."
+
 -------------------------------
 
 
