@@ -6,7 +6,8 @@
 _Customise and aggregate your favourite RSS sources without bloat or distracting ads._
 
 
-<img width="1754" height="959" alt="image" src="https://github.com/user-attachments/assets/4b79290e-e74f-4fbc-90a2-a05c11462fb8" />
+<img width="1549" height="934" alt="image" src="https://github.com/user-attachments/assets/87f7e7d5-a9a5-43c9-8ad8-e678f49c1465" />
+
 
 pages.json stores a list of RSS feeds and numbers to view them (BBC news is 101, Hacker news is 500, etc)
 
