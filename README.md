@@ -1,5 +1,5 @@
 # CEETEX
-#### Ceefax/Teletext Emulator for modern web feeds  [WORK IN PROGRESS]
+#### Ceefax/Teletext engine for modern web feeds  [WORK IN PROGRESS]
 
 #### A bridge between the high-speed data of 2026 and the low-resolution, "Mode 7" broadcast aesthetic of the 1990s.
 
