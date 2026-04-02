@@ -16,8 +16,8 @@ CEETEX is a Python-based RSS reader that reimagines modern data through the high
 
 -------------------------------
 
-### `pages.json` stores a list of RSS feeds and codes to view them (BBC news is 101, Hacker news is 500, etc)
+### `pages.json` stores a list of RSS feeds and codes to view them <br>(BBC news is 101, Hacker news is 500, etc)
 
-Click on headlines to view them, Press `O` to open a web browser with full articles
+### Click on headlines to view them, Press `O` to open a web browser with full articles
 
 requirements: `textual` , `feedparser` , `rich`
