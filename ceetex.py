@@ -239,6 +239,17 @@ class TeletextApp(App):
             if link:
                 webbrowser.open(link)
 
+    def on_key(self, event) -> None:
+        """Global key handler to ensure numbers always go to the dialer."""
+        if event.character and event.character.isdigit():
+            dialer = self.query_one("#dialer")
+            if not dialer.has_focus:
+                dialer.focus()
+                # Manually append the first digit since focus() 
+                # might swallow the initial keystroke
+                dialer.value += event.character
+                event.stop()
+
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handles 3-digit dialing and clears input correctly."""
         val = event.value
