@@ -20,7 +20,6 @@ CEETEX_LOGO = """
 """
 
 class TeletextApp(App):
-    """CEETEX ULTIMATE - Enhanced & Stabilized Edition."""
     
     BINDINGS = [
         Binding("escape", "back_to_list", "Index/Back"),
