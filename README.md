@@ -5,6 +5,8 @@
 
 _Customise and aggregate your favourite RSS sources without bloat or distracting ads._
 
+CEETEX solves a modern, real-world problem (internet bloat and ad-fatigue) using a 40-year-old user experience metaphor (Teletext/Ceefax).
+
 
 <img width="1549" height="934" alt="image" src="https://github.com/user-attachments/assets/87f7e7d5-a9a5-43c9-8ad8-e678f49c1465" />
 
