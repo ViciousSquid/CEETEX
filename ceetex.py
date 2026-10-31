@@ -17,6 +17,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text
@@ -169,7 +170,11 @@ class TeletextApp(App):
         self._apply_width()
         self.query_one("#dialer", Input).focus()
         self.display_index()
-        self.set_interval(1.0, self._tick)
+        self._clock_timer = self.set_interval(1.0, self._tick)
+
+    def on_unmount(self) -> None:
+        if hasattr(self, "_clock_timer"):
+            self._clock_timer.stop()
 
     def on_resize(self) -> None:
         self._apply_width()
@@ -195,8 +200,12 @@ class TeletextApp(App):
         return max(12, min(CLASSIC_WIDTH if self.classic_mode else self.size.width, max(12, self.size.width)) - 4)
 
     def _tick(self) -> None:
-        self.update_header()
-        self._update_sub_header()
+        try:
+            self.update_header()
+            self._update_sub_header()
+        except NoMatches:
+            # The timer can be scheduled just as Textual dismantles the screen.
+            return
         if self.auto_rotate and self.view_mode == "list" and time.monotonic() >= self.next_rotation:
             self.next_rotation = time.monotonic() + self.rotation_seconds
             self._change_subpage(1, record_history=False)

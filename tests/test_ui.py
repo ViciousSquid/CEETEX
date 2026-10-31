@@ -227,4 +227,4 @@ async def test_malicious_feed_markups_stay_plain_text_in_views():
             await pilot.pause()
             # The summary parser must remove embedded scripts but retain
             # literal Rich-formatting strings as ordinary text.
-            assert "INJECT" not in str(app.query_one("#article_view", Static).renderable)
+            assert "INJECT" not in str(app.query_one("#article_view", Static).render())
