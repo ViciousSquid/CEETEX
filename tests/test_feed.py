@@ -1,11 +1,14 @@
 """HTTP feed transport regression tests. No real network requests."""
 from io import BytesIO
+import ssl
 from unittest.mock import patch
 from urllib.error import HTTPError
 
 import pytest
 
-from ceetex_feed import HTTP_TIMEOUT_SECONDS, MAX_FEED_BYTES, fetch_http_feed
+from ceetex_feed import (
+    HTTP_TIMEOUT_SECONDS, MAX_FEED_BYTES, fetch_http_feed, verified_ssl_context,
+)
 
 
 class Response(BytesIO):
@@ -21,14 +24,17 @@ class Response(BytesIO):
 def test_conditional_headers_timeout_and_result():
     seen = []
 
-    def opener(request, *, timeout):
-        seen.append((dict(request.header_items()), timeout))
+    def opener(request, *, timeout, context):
+        seen.append((dict(request.header_items()), timeout, context))
         return Response(b"<rss/>", {"ETag": '"v2"', "Last-Modified": "yesterday"})
 
     with patch("ceetex_feed.urlopen", opener):
         result = fetch_http_feed("https://example.org/feed", etag='"v1"', last_modified="earlier")
-    headers, timeout = seen[0]
+    headers, timeout, context = seen[0]
     assert timeout == HTTP_TIMEOUT_SECONDS
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.get_ca_certs()
     assert headers["If-none-match"] == '"v1"'
     assert headers["If-modified-since"] == "earlier"
     assert result.body == b"<rss/>"
@@ -64,3 +70,37 @@ def test_rejects_non_http_and_redirected_non_http():
     with patch("ceetex_feed.urlopen", return_value=Response(b"<rss/>", url="file:///etc/passwd")):
         with pytest.raises(ValueError, match="redirect"):
             fetch_http_feed("https://example.org/feed")
+
+
+def test_certifi_bundle_loads_even_with_no_platform_root_certs():
+    """Reproduce a macOS Python interpreter with an empty default trust store."""
+    empty_platform_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    assert empty_platform_context.get_ca_certs() == []
+    with patch("ceetex_feed.ssl.create_default_context", return_value=empty_platform_context):
+        result = verified_ssl_context()
+    assert result is empty_platform_context
+    assert result.verify_mode == ssl.CERT_REQUIRED
+    assert result.check_hostname is True
+    assert result.get_ca_certs(), "certifi must provide CA roots for HTTPS"
+
+
+def test_all_requests_keep_strict_tls_verification():
+    observed = []
+    def opener(request, *, timeout, context):
+        observed.append((request.full_url, context.check_hostname, context.verify_mode))
+        return Response(b"<rss/>")
+
+    with patch("ceetex_feed.urlopen", opener):
+        fetch_http_feed("https://example.org/rss")
+        fetch_http_feed("http://example.org/rss")
+
+    assert len(observed) == 2
+    assert all(hosts and mode == ssl.CERT_REQUIRED for _, hosts, mode in observed)
+
+
+def test_ssl_certificate_failure_is_not_silently_ignored():
+    from urllib.error import URLError
+    failure = URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+    with patch("ceetex_feed.urlopen", side_effect=failure):
+        with pytest.raises(URLError):
+            fetch_http_feed("https://example.org/rss")
