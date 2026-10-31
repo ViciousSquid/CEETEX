@@ -350,6 +350,9 @@ async def test_dialled_channel_finishes_with_list_focus():
             app.feed_cache["101"] = __import__("ceetex").FeedSnapshot(
                 fixture_entries(3), time.time(), "NEWS",
             )
+            # Let Textual settle the initial ListView focus before typing.
+            await pilot.pause()
+            assert app.query_one("#main_list", ListView).has_focus
             await pilot.press("1", "0", "1")
             await pilot.pause()
             assert app.current_page_id == "101", (
