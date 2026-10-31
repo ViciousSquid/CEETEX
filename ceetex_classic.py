@@ -112,7 +112,7 @@ def compose_classic(
         draw_mode7_row(grid, 17, bytes([0x11, 0x7F, 0x1E, 0x7F, 0x7F,
                                         0x12, 0x7F, 0x7F, 0x1F]))
         grid.write(1, 19, "V REVEALS THE SECRET BELOW:", fg="yellow")
-        grid.write(1, 20, "THE MAP IS THE PROGRAM", fg="cyan", conceal=True)
+        grid.write(1, 20, "YOUR NEWS IS YOURS TO KEEP", fg="cyan", conceal=True)
         grid.write(0, 22, "CEETEX • MODERN NEWS, CLASSIC FEEL", fg="green")
     elif mode == "article" and 0 <= selected_index < len(entries):
         entry = entries[selected_index]
