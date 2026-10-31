@@ -633,14 +633,18 @@ class TeletextApp(App):
             entries, time.time(), source, etag=etag, last_modified=last_modified,
         )
         self.feed_cache[page_id] = snapshot
-        save_cached_feed(
-            page_id, entries, snapshot.fetched_at, source,
-            self.pages[page_id][1], etag, last_modified,
-        )
-        if self.view_mode == "article" and self._refresh_article_key is not None:
+        if page_id not in ("900", "901"):
+            save_cached_feed(
+                page_id, entries, snapshot.fetched_at, source,
+                self.pages[page_id][1], etag, last_modified,
+            )
+        previous_key = self._refresh_article_key
+        if previous_key is None and self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries):
+            previous_key = article_identity(self.entries[self.selected_entry])
+        if self.view_mode == "article" and previous_key is not None:
             index = next(
                 (i for i, entry in enumerate(entries)
-                 if article_identity(entry) == self._refresh_article_key),
+                 if article_identity(entry) == previous_key),
                 None,
             )
             if index is None:
@@ -672,19 +676,26 @@ class TeletextApp(App):
         lst = self.query_one("#main_list", ListView)
         lst.clear()
         self.displayed_indices = []
-        latest = escape((clean_feed_text(self.entries[0].get("title")) or "UNTITLED").upper())
+        latest = escape((clean_feed_text(self.entries[0].get("title")) or "UNTITLED").upper()) if self.entries else "NO HEADLINES"
         self.query_one("#ticker_tape", Static).update(f" [b yellow]LATEST:[/b yellow] {latest}")
         for global_idx, entry in subpage_entries(self.entries, self.current_subpage, self.page_size):
             title = (clean_feed_text(entry.get("title")) or "UNTITLED").upper()
-            title = textwrap.shorten(title, width=self.content_width, placeholder="…")
-            lst.append(ListItem(Label(f"[cyan]█[/cyan] [white]{escape(title)}[/white]", markup=True)))
+            source = str(entry.get("source_page", ""))
+            prefix = f"P{source} " if source else ""
+            unread = not self.reading.is_read(self.current_page_id, entry)
+            saved = self.reading.is_bookmarked(self.current_page_id, entry)
+            title = textwrap.shorten(prefix + title, width=self.content_width - 2, placeholder="…")
+            glyph = "◆" if saved else ("●" if unread else "·")
+            colour = "yellow" if saved else ("cyan" if unread else "white")
+            lst.append(ListItem(Label(f"[{colour}]{glyph}[/{colour}] [white]{escape(title)}[/white]", markup=True)))
             self.displayed_indices.append(global_idx)
         self._toggle_views(list_view=True)
         if self.selected_entry in self.displayed_indices:
             lst.index = self.displayed_indices.index(self.selected_entry)
         elif self.displayed_indices:
             lst.index = 0
-        lst.focus()
+        if not self.classic_mode:
+            lst.focus()
 
     def _render_article(self) -> None:
         if not (0 <= self.selected_entry < len(self.entries)):
@@ -693,6 +704,8 @@ class TeletextApp(App):
             return
         self.view_mode = "article"
         entry = self.entries[self.selected_entry]
+        if self.reading.mark_read(self.current_page_id, entry):
+            self.reading.save()
         title = (clean_feed_text(entry.get("title")) or "UNTITLED").upper()
         summary = clean_feed_text(
             entry.get("summary", entry.get("description", "NO DETAILS PROVIDED.")),
@@ -702,7 +715,8 @@ class TeletextApp(App):
         title = textwrap.fill(title, width=width)
         summary = textwrap.fill(summary, width=width)
         view = self.query_one("#article_view", Static)
-        view.update(f"[b cyan]{escape(title)}[/b cyan]\n\n[white]{escape(summary)}[/white]\n\n[b yellow]O: FULL STORY   ESC: BACK[/b yellow]")
+        saved = "REMOVE BOOKMARK" if self.reading.is_bookmarked(self.current_page_id, entry) else "BOOKMARK"
+        view.update(f"[b cyan]{escape(title)}[/b cyan]\n\n[white]{escape(summary)}[/white]\n\n[b yellow]O: WEB  B: {saved}  ESC: BACK[/b yellow]")
         self._toggle_views(article=True)
 
     def show_error(self, page_id: str, message: str, request_id: int | None = None) -> None:
@@ -710,6 +724,7 @@ class TeletextApp(App):
             return
         self.fetching = False
         self._refresh_article_key = None
+        self._error_text = message
         cached = self.feed_cache.get(page_id)
         if cached is not None:
             cached.offline = True
@@ -749,6 +764,12 @@ class TeletextApp(App):
             self.load_page(target)
 
     def _change_subpage(self, offset: int, *, record_history: bool = True) -> None:
+        if self.view_mode == "index" and self.classic_mode and self.index_mapping:
+            total = page_count(len(self.index_mapping), INDEX_PER_PAGE)
+            self._classic_index_page = next_subpage(self._classic_index_page, total, offset)
+            self._classic_index_selection = self._classic_index_page * INDEX_PER_PAGE
+            self._render_classic()
+            return
         if self.view_mode != "list" or not self.entries:
             return
         total = page_count(len(self.entries), self.page_size)
@@ -776,7 +797,7 @@ class TeletextApp(App):
         self.notify("AUTO SUBPAGES ON" if self.auto_rotate else "AUTO SUBPAGES OFF")
 
     def action_toggle_classic(self) -> None:
-        if self.view_mode == "list":
+        if self.view_mode == "list" and not self.classic_mode:
             # Convert the highlighted row to its global article index BEFORE
             # changing the number of entries per subpage.
             list_index = self.query_one("#main_list", ListView).index
