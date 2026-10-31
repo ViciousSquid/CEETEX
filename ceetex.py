@@ -75,10 +75,18 @@ class FeedSnapshot:
     last_modified: str | None = None
 
 
+class DialingListView(ListView):
+    """Keep direct page-number entry working while list navigation has focus."""
+
+    def on_key(self, event) -> None:
+        if event.character and len(event.character) == 1 and event.character in "0123456789":
+            self.app.action_dial_digit(event.character)
+            event.prevent_default()
+            event.stop()
+
+
 class TeletextApp(App):
     BINDINGS = [
-        *(Binding(str(digit), f"dial_digit('{digit}')", show=False, priority=True)
-          for digit in range(10)),
         Binding("escape", "back_to_list", "Back/Index", priority=True),
         Binding("home", "go_home", "Index", priority=True),
         Binding("f1", "fasttext('red')", "News", show=False, priority=True),
@@ -192,7 +200,7 @@ class TeletextApp(App):
             yield Static("", id="sub_header", markup=False)
             with Container(id="teletext_container"):
                 yield Static(" DIRECTORY", id="directory_header", classes="hidden")
-                yield ListView(id="main_list")
+                yield DialingListView(id="main_list")
                 yield Static(" [blink]LOADING DATA...[/blink]", id="loading_msg", classes="hidden")
                 with VerticalScroll(id="article_scroll", classes="hidden"):
                     yield Static("", id="article_view", markup=True)
@@ -676,6 +684,16 @@ class TeletextApp(App):
         dialer = self.query_one("#dialer", Input)
         dialer.focus()
         dialer.value += digit
+
+    def on_key(self, event) -> None:
+        if (
+            event.character and len(event.character) == 1
+            and event.character in "0123456789"
+            and not self.query_one("#dialer", Input).has_focus
+        ):
+            self.action_dial_digit(event.character)
+            event.prevent_default()
+            event.stop()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "dialer":
