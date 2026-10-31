@@ -50,21 +50,21 @@ class FeedSnapshot:
 
 class TeletextApp(App):
     BINDINGS = [
-        Binding("escape", "back_to_list", "Back/Index"),
-        Binding("home", "go_home", "Index"),
-        Binding("f1", "fasttext('red')", "News", show=False),
-        Binding("f2", "fasttext('green')", "Sport", show=False),
-        Binding("f3", "fasttext('yellow')", "Weather", show=False),
-        Binding("f4", "fasttext('cyan')", "Travel", show=False),
-        Binding("n", "next_subpage", "Next page"),
-        Binding("p", "previous_subpage", "Previous page"),
-        Binding("a", "toggle_auto_rotate", "Auto subpages"),
-        Binding("m", "toggle_classic", "40 columns"),
-        Binding("ctrl+left", "history_back", "Back", show=False),
-        Binding("ctrl+right", "history_forward", "Forward", show=False),
-        Binding("r", "refresh", "Refresh"),
-        Binding("o", "open_browser", "Open story"),
-        Binding("q", "quit", "Quit"),
+        Binding("escape", "back_to_list", "Back/Index", priority=True),
+        Binding("home", "go_home", "Index", priority=True),
+        Binding("f1", "fasttext('red')", "News", show=False, priority=True),
+        Binding("f2", "fasttext('green')", "Sport", show=False, priority=True),
+        Binding("f3", "fasttext('yellow')", "Weather", show=False, priority=True),
+        Binding("f4", "fasttext('cyan')", "Travel", show=False, priority=True),
+        Binding("n", "next_subpage", "Next page", priority=True),
+        Binding("p", "previous_subpage", "Previous page", priority=True),
+        Binding("a", "toggle_auto_rotate", "Auto subpages", priority=True),
+        Binding("m", "toggle_classic", "40 columns", priority=True),
+        Binding("ctrl+left", "history_back", "Back", show=False, priority=True),
+        Binding("ctrl+right", "history_forward", "Forward", show=False, priority=True),
+        Binding("r", "refresh", "Refresh", priority=True),
+        Binding("o", "open_browser", "Open story", priority=True),
+        Binding("q", "quit", "Quit", priority=True),
     ]
 
     CSS = """
