@@ -79,6 +79,9 @@ def compose_classic(
             grid.write(0, row, line[:40].ljust(40),
                        fg="yellow" if is_selected else ("white" if unread else "cyan"),
                        bg="blue" if is_selected else "black")
+            if unread:
+                grid.put(1, row, "●", fg="yellow", flash=True,
+                         bg="blue" if is_selected else "black")
             if book:
                 grid.write(39, row, "◆", fg="yellow",
                            bg="blue" if is_selected else "black")
@@ -88,6 +91,8 @@ def compose_classic(
         entry = entries[selected_index]
         heading = clean_feed_text(entry.get("title") or "UNTITLED").upper()
         grid.write(0, 5, textwrap.shorten(heading, width=40, placeholder="…"), fg="yellow")
+        origin = clean_feed_text(entry.get("source_name") or page_title)
+        grid.write(0, 6, f"SOURCE: {origin}"[:39], fg="cyan", conceal=True)
         body = clean_feed_text(entry.get("summary", entry.get("description", "NO DETAILS")), html_content=True)
         for n, line in enumerate(textwrap.wrap(body, width=38, break_long_words=True)[:15]):
             grid.write(1, 7 + n, line, fg="white")
@@ -98,7 +103,7 @@ def compose_classic(
         grid.write(1, 10, "ESC INDEX   R RETRY", fg="yellow")
 
     if mode != "index":
-        grid.write(0, 23, "ESC BACK  G NEWSWIRE  K SAVED  V REVEAL", fg="cyan")
+        grid.write(0, 23, "ESC BACK G NEWS K SAVED V REVEAL H HOLD", fg="cyan")
     else:
         grid.write(0, 23, "TYPE PAGE NUMBER   G NEWS  K SAVED", fg="cyan")
     for i, colour in enumerate(FASTTEXT_COLOURS):
