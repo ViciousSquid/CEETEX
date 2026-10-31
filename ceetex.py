@@ -155,6 +155,11 @@ class TeletextApp(App):
             ):
                 self.config_warnings.append(f"pages.json: invalid channel {page_id!r}")
                 continue
+            if page_id != "100":
+                parsed = urlparse(channel[1])
+                if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc or any(ch.isspace() for ch in channel[1]):
+                    self.config_warnings.append(f"pages.json: invalid feed URL for {page_id}")
+                    continue
             pages[page_id] = channel
         pages["100"] = ["INDEX", ""]
         return pages
@@ -163,13 +168,16 @@ class TeletextApp(App):
         overrides = read_json_config("fasttext.json", {}, self.config_warnings)
         return validate_fasttext(overrides, self.pages, FASTTEXT_DEFAULTS)
 
-    @staticmethod
-    def load_settings() -> dict:
-        """Optional runtime defaults; toggles don't rewrite the user's config."""
-        data = read_json_config("settings.json", {})
+    def load_settings(self) -> dict:
+        """Validate optional startup preferences; never persist runtime toggles."""
+        data = read_json_config("settings.json", {}, self.config_warnings)
         seconds = data.get("rotation_seconds", AUTO_ROTATE_SECONDS)
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 2 <= seconds <= 300:
+            self.config_warnings.append("settings.json: rotation_seconds must be from 2 to 300")
             seconds = AUTO_ROTATE_SECONDS
+        for key in ("auto_subpages", "classic_mode"):
+            if key in data and not isinstance(data[key], bool):
+                self.config_warnings.append(f"settings.json: {key} must be a boolean")
         return {
             "rotation_seconds": seconds,
             "auto_subpages": data.get("auto_subpages") is True,
