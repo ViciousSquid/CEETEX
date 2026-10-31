@@ -475,3 +475,38 @@ async def test_persisted_feed_restores_without_fetch_after_app_restart():
             assert second.entries[0]["title"].startswith("Headline")
             assert second._signal() == "CACHED"
         assert calls == ["500"]
+
+
+@pytest.mark.asyncio
+async def test_auto_refresh_is_opt_in_and_does_not_blank_open_article():
+    calls = []
+    def no_fetch(self, page_id, url, request_id):
+        calls.append(page_id)
+    with patch.object(TeletextApp, "fetch_feed", no_fetch):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(3), "NEWS", app.request_id)
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            assert app.view_mode == "article"
+            assert not app.auto_refresh_seconds
+            app.auto_refresh_seconds = 60
+            app.next_auto_refresh = 0
+            app._tick()
+            assert app.fetching
+            assert app.view_mode == "article"
+            assert app.query_one("#article_scroll").display
+            app._tick()
+            assert calls == ["101", "101"]
+
+
+def test_auto_refresh_settings_validation(tmp_path, monkeypatch):
+    monkeypatch.setattr("ceetex.ROOT", tmp_path)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    (tmp_path / "settings.json").write_text('{"auto_refresh_seconds": 120}')
+    assert TeletextApp().auto_refresh_seconds == 120
+    (tmp_path / "settings.json").write_text('{"auto_refresh_seconds": 2}')
+    app = TeletextApp()
+    assert app.auto_refresh_seconds == 0
+    assert any("auto_refresh_seconds" in w for w in app.config_warnings)
