@@ -310,6 +310,7 @@ class TeletextApp(App):
             # Fixed Teletext viewport on sufficiently tall terminals.
             # Retain a usable scrollable interface on smaller terminal windows.
             frame.styles.height = min(25, max(1, self.size.height)) if self.classic_mode else "100%"
+            frame.set_class(self.classic_mode, "classic")
         except Exception:
             pass  # Widget may not be mounted during the first resize event.
 
@@ -335,7 +336,10 @@ class TeletextApp(App):
             and time.monotonic() >= self.next_auto_refresh
         ):
             self.action_refresh()
-        if self.auto_rotate and self.view_mode == "list" and time.monotonic() >= self.next_rotation:
+        if self.classic_mode:
+            self._render_classic()
+        if (self.auto_rotate and not self.hold_page and self.view_mode == "list"
+                and time.monotonic() >= self.next_rotation):
             self.next_rotation = time.monotonic() + self.rotation_seconds
             self._change_subpage(1, record_history=False)
 
@@ -386,12 +390,79 @@ class TeletextApp(App):
         self.query_one("#sub_header", Static).update(header)
 
     def _toggle_views(self, *, list_view=False, article=False, loading=False) -> None:
-        self.query_one("#main_list").set_class(not list_view, "hidden")
-        self.query_one("#directory_header").set_class(not (list_view and self.view_mode == "index"), "hidden")
-        self.query_one("#article_scroll").set_class(not article, "hidden")
-        self.query_one("#loading_msg").set_class(not loading, "hidden")
+        classic = self.classic_mode
+        self.query_one("#classic_page").set_class(not classic, "hidden")
+        self.query_one("#main_list").set_class(classic or not list_view, "hidden")
+        self.query_one("#directory_header").set_class(classic or not (list_view and self.view_mode == "index"), "hidden")
+        self.query_one("#article_scroll").set_class(classic or not article, "hidden")
+        self.query_one("#loading_msg").set_class(classic or not loading, "hidden")
         self.update_header()
         self._update_sub_header()
+        if classic:
+            self._render_classic()
+            self.query_one("#classic_page", ClassicTeletextScreen).focus()
+
+    def _render_classic(self) -> None:
+        if not self.classic_mode:
+            return
+        displayed = self.displayed_indices if self.view_mode == "list" else []
+        selected = self._classic_index_selection if self.view_mode == "index" else self.selected_entry
+        if self.view_mode == "list" and selected not in displayed and displayed:
+            selected = displayed[0]
+        title = self.pages.get(self.current_page_id, ["NO SIGNAL"])[0]
+        page = compose_classic(
+            page_id=self.current_page_id, mode=self.view_mode, page_title=title,
+            pages=self.pages, index_mapping=self.index_mapping,
+            entries=self.entries, displayed_indices=displayed,
+            current_subpage=self.current_subpage, selected_index=selected,
+            fasttext_pages=self.fasttext_pages, reading=self.reading,
+            reveal=self.reveal, index_subpage=self._classic_index_page,
+            message=self._error_text or ("TUNING..." if self.fetching else "NO SIGNAL"),
+        )
+        self._classic_hits = page.hit_regions
+        self.query_one("#classic_page", ClassicTeletextScreen).update(
+            page.grid.rich(reveal=self.reveal, flash_on=(int(time.time()) % 2 == 0))
+        )
+
+    def classic_key(self, key: str) -> None:
+        if not self.classic_mode:
+            return
+        if key == "enter":
+            if self.view_mode == "index":
+                if 0 <= self._classic_index_selection < len(self.index_mapping):
+                    self.load_page(self.index_mapping[self._classic_index_selection])
+            elif self.view_mode == "list" and 0 <= self.selected_entry < len(self.entries):
+                self._navigate(PageState(self.current_page_id, "article", self.current_subpage, self.selected_entry))
+            return
+        offset = -1 if key == "up" else 1
+        if self.view_mode == "index" and self.index_mapping:
+            self._classic_index_selection = max(0, min(len(self.index_mapping) - 1,
+                                                          self._classic_index_selection + offset))
+            self._classic_index_page = self._classic_index_selection // INDEX_PER_PAGE
+        elif self.view_mode == "list" and self.displayed_indices:
+            try:
+                position = self.displayed_indices.index(self.selected_entry)
+            except ValueError:
+                position = 0
+            self.selected_entry = self.displayed_indices[max(0, min(
+                len(self.displayed_indices) - 1, position + offset))]
+        self._render_classic()
+
+    def classic_click(self, x: int, y: int) -> None:
+        if not self.classic_mode:
+            return
+        if y == 24 and 0 <= x < 40:
+            self.action_fasttext(("red", "green", "yellow", "cyan")[x // 10])
+            return
+        for start, stop, index in self._classic_hits.get(y, []):
+            if not start <= x < stop:
+                continue
+            if self.view_mode == "index":
+                self._classic_index_selection = index
+            else:
+                self.selected_entry = index
+            self.classic_key("enter")
+            return
 
     def display_index(self) -> None:
         self.view_mode = "index"
@@ -416,13 +487,16 @@ class TeletextApp(App):
             line = f" [white]{escape(name)}[/white] [yellow]{dots}[/yellow] [cyan]{page}[/cyan]"
             lst.append(ListItem(Label(line, markup=True)))
             self.index_mapping.append(page)
+        self._classic_index_page = 0
+        self._classic_index_selection = 0
         self._toggle_views(list_view=True)
         if self.index_mapping:
             lst.index = 0
-        lst.focus()
+        if not self.classic_mode:
+            lst.focus()
 
     def _capture_state(self) -> PageState:
-        if self.view_mode == "list":
+        if self.view_mode == "list" and not self.classic_mode:
             idx = self.query_one("#main_list", ListView).index
             if idx is not None and idx < len(self.displayed_indices):
                 self.selected_entry = self.displayed_indices[idx]
