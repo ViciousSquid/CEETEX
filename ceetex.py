@@ -847,6 +847,37 @@ class TeletextApp(App):
         if target:
             self.load_page(target)
 
+    def action_newswire(self) -> None:
+        self.load_page("900")
+
+    def action_bookmarks(self) -> None:
+        self.load_page("901")
+
+    def action_bookmark(self) -> None:
+        if self.view_mode != "article" or not (0 <= self.selected_entry < len(self.entries)):
+            return
+        entry = dict(self.entries[self.selected_entry])
+        if not entry.get("source_page"):
+            entry["source_page"] = self.current_page_id
+        if not entry.get("source_name"):
+            entry["source_name"] = self.pages.get(self.current_page_id, ["CEETEX"])[0]
+        stored = self.reading.toggle_bookmark(self.current_page_id, entry)
+        self.reading.save()
+        self.notify("STORY BOOKMARKED" if stored else "BOOKMARK REMOVED")
+        self._render_article()
+
+    def action_reveal(self) -> None:
+        self.reveal = not self.reveal
+        if self.classic_mode:
+            self._render_classic()
+        self.notify("REVEAL ON" if self.reveal else "REVEAL OFF")
+
+    def action_hold(self) -> None:
+        self.hold_page = not self.hold_page
+        if not self.hold_page:
+            self.next_rotation = time.monotonic() + self.rotation_seconds
+        self.notify("HOLD" if self.hold_page else "HOLD RELEASED")
+
     def _change_subpage(self, offset: int, *, record_history: bool = True) -> None:
         if self.view_mode == "index" and self.classic_mode and self.index_mapping:
             total = page_count(len(self.index_mapping), INDEX_PER_PAGE)
@@ -902,6 +933,8 @@ class TeletextApp(App):
             if self.selected_entry >= 0:
                 self.current_subpage = self.selected_entry // self.page_size
             self._render_article()
+        elif self.view_mode == "error":
+            self._toggle_views(article=True)
         self.notify("40-COLUMN MODE" if self.classic_mode else "RESPONSIVE MODE")
 
     def action_history_back(self) -> None:
