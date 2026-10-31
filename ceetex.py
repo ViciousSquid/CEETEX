@@ -225,7 +225,11 @@ class TeletextApp(App):
 
     def _apply_width(self) -> None:
         try:
-            self.query_one("#teletext_screen").styles.width = min(CLASSIC_WIDTH, max(1, self.size.width)) if self.classic_mode else "100%"
+            frame = self.query_one("#teletext_screen")
+            frame.styles.width = min(CLASSIC_WIDTH, max(1, self.size.width)) if self.classic_mode else "100%"
+            # Fixed Teletext viewport on sufficiently tall terminals.
+            # Retain a usable scrollable interface on smaller terminal windows.
+            frame.styles.height = min(25, max(1, self.size.height)) if self.classic_mode else "100%"
         except Exception:
             pass  # Widget may not be mounted during the first resize event.
 
