@@ -22,7 +22,13 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text
+from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text, article_identity
+from ceetex_feed import fetch_http_feed, describe_feed_error
+from ceetex_cache import load_feed as load_cached_feed, save_feed as save_cached_feed
+from ceetex_classic import INDEX_PER_PAGE, compose_classic
+from ceetex_newswire import MAX_WIRE_SOURCES, merge_feeds
+from ceetex_reading import ReadingState
+from ceetex_teletext import COLUMNS, ROWS
 
 ROOT = Path(__file__).resolve().parent
 FASTTEXT_DEFAULTS = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
@@ -53,6 +59,18 @@ def read_json_config(filename: str, fallback: dict, warnings: list[str] | None =
         except (OSError, ValueError, TypeError) as exc:
             if warnings is not None:
                 warnings.append(f"{path}: {exc}")
+    # Installed wheels keep their bundled defaults inside a small resource
+    # package rather than relying on the user's current working directory.
+    if filename == "pages.json":
+        try:
+            from importlib.resources import files
+            bundled = json.loads(
+                files("ceetex_resources").joinpath("pages.json").read_text(encoding="utf-8")
+            )
+            if isinstance(bundled, dict):
+                return bundled
+        except (OSError, ValueError, TypeError, ModuleNotFoundError):
+            pass
     return fallback.copy()
 
 
@@ -70,6 +88,42 @@ class FeedSnapshot:
     fetched_at: float
     source: str
     offline: bool = False
+    etag: str | None = None
+    last_modified: str | None = None
+
+
+class DialingInput(Input):
+    """Route typed digits through a stable three-key buffer."""
+
+    def on_key(self, event) -> None:
+        if event.character and len(event.character) == 1 and event.character in "0123456789":
+            self.app.action_dial_digit(event.character)
+            event.prevent_default()
+            event.stop()
+
+
+class DialingListView(ListView):
+    """Keep direct page-number entry working while list navigation has focus."""
+
+    def on_key(self, event) -> None:
+        if event.character and len(event.character) == 1 and event.character in "0123456789":
+            self.app.action_dial_digit(event.character)
+            event.prevent_default()
+            event.stop()
+
+
+class ClassicTeletextScreen(Static):
+    """Keyboard and mouse navigation on the exact 40x25 Teletext surface."""
+    can_focus = True
+
+    def on_key(self, event) -> None:
+        if event.key in ("up", "down", "enter"):
+            self.app.classic_key(event.key)
+            event.prevent_default()
+            event.stop()
+
+    def on_click(self, event) -> None:
+        self.app.classic_click(event.offset.x, event.offset.y)
 
 
 class TeletextApp(App):
@@ -83,7 +137,12 @@ class TeletextApp(App):
         Binding("n", "next_subpage", "Next page", priority=True),
         Binding("p", "previous_subpage", "Previous page", priority=True),
         Binding("a", "toggle_auto_rotate", "Auto subpages", priority=True),
-        Binding("m", "toggle_classic", "40 columns", priority=True),
+        Binding("m", "toggle_classic", "Classic Teletext", priority=True),
+        Binding("g", "newswire", "News wire", priority=True),
+        Binding("k", "bookmarks", "Saved stories", priority=True),
+        Binding("b", "bookmark", "Save story", priority=True),
+        Binding("v", "reveal", "Reveal concealed text", priority=True),
+        Binding("h", "hold", "Hold page", priority=True),
         Binding("ctrl+left", "history_back", "Back", show=False, priority=True),
         Binding("ctrl+right", "history_forward", "Forward", show=False, priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
@@ -113,6 +172,13 @@ class TeletextApp(App):
     #loading_msg { color: #ffff00; text-style: blink; margin: 2; }
     #article_scroll { height: 1fr; width: 100%; overflow-y: auto; }
     #article_view { padding: 1 1; }
+    #classic_page { width: 40; height: 25; background: #000000; padding: 0; margin: 0; }
+    #teletext_screen.classic #page_header,
+    #teletext_screen.classic #sub_header,
+    #teletext_screen.classic #ticker_tape,
+    #teletext_screen.classic #fasttext_bar,
+    #teletext_screen.classic #dialer { display: none; }
+    #teletext_screen.classic #teletext_container { height: 25; width: 40; }
     """
 
     def __init__(self) -> None:
@@ -122,6 +188,8 @@ class TeletextApp(App):
         self.fasttext_pages = self.load_fasttext()
         self.settings = self.load_settings()
         self.rotation_seconds = self.settings["rotation_seconds"]
+        self.auto_refresh_seconds = self.settings["auto_refresh_seconds"]
+        self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
         self.feed_cache: dict[str, FeedSnapshot] = {}
         self.entries: list = []
         self.displayed_indices: list[int] = []
@@ -138,6 +206,15 @@ class TeletextApp(App):
         self.served_from_cache = False
         self.history: list[PageState] = [PageState("100", "index")]
         self.history_position = 0
+        self._refresh_article_key: str | None = None
+        self._dial_digits = ""
+        self.reading = ReadingState.load()
+        self.reveal = False
+        self.hold_page = False
+        self._classic_index_page = 0
+        self._classic_index_selection = 0
+        self._classic_hits: dict[int, list[tuple[int, int, int]]] = {}
+        self._error_text = ""
 
     def load_config(self) -> dict:
         data = read_json_config("pages.json", {"100": ["INDEX", ""]}, self.config_warnings)
@@ -151,23 +228,40 @@ class TeletextApp(App):
             ):
                 self.config_warnings.append(f"pages.json: invalid channel {page_id!r}")
                 continue
+            if page_id not in ("100", "900", "901", "902"):
+                parsed = urlparse(channel[1])
+                if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc or any(ch.isspace() for ch in channel[1]):
+                    self.config_warnings.append(f"pages.json: invalid feed URL for {page_id}")
+                    continue
             pages[page_id] = channel
         pages["100"] = ["INDEX", ""]
+        pages["900"] = ["NEWSWIRE", ""]
+        pages["901"] = ["BOOKMARKS", ""]
+        pages["902"] = ["HELP", ""]
         return pages
 
     def load_fasttext(self) -> dict[str, str]:
         overrides = read_json_config("fasttext.json", {}, self.config_warnings)
         return validate_fasttext(overrides, self.pages, FASTTEXT_DEFAULTS)
 
-    @staticmethod
-    def load_settings() -> dict:
-        """Optional runtime defaults; toggles don't rewrite the user's config."""
-        data = read_json_config("settings.json", {})
+    def load_settings(self) -> dict:
+        """Validate optional startup preferences; never persist runtime toggles."""
+        data = read_json_config("settings.json", {}, self.config_warnings)
         seconds = data.get("rotation_seconds", AUTO_ROTATE_SECONDS)
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 2 <= seconds <= 300:
+            self.config_warnings.append("settings.json: rotation_seconds must be from 2 to 300")
             seconds = AUTO_ROTATE_SECONDS
+        for key in ("auto_subpages", "classic_mode"):
+            if key in data and not isinstance(data[key], bool):
+                self.config_warnings.append(f"settings.json: {key} must be a boolean")
+        refresh = data.get("auto_refresh_seconds", 0)
+        if (isinstance(refresh, bool) or not isinstance(refresh, (int, float))
+                or (refresh != 0 and not 60 <= refresh <= 3600)):
+            self.config_warnings.append("settings.json: auto_refresh_seconds must be 0 or 60 to 3600")
+            refresh = 0
         return {
             "rotation_seconds": seconds,
+            "auto_refresh_seconds": refresh,
             "auto_subpages": data.get("auto_subpages") is True,
             "classic_mode": data.get("classic_mode") is True,
         }
@@ -178,7 +272,8 @@ class TeletextApp(App):
             yield Static("", id="sub_header", markup=False)
             with Container(id="teletext_container"):
                 yield Static(" DIRECTORY", id="directory_header", classes="hidden")
-                yield ListView(id="main_list")
+                yield ClassicTeletextScreen("", id="classic_page", classes="hidden")
+                yield DialingListView(id="main_list")
                 yield Static(" [blink]LOADING DATA...[/blink]", id="loading_msg", classes="hidden")
                 with VerticalScroll(id="article_scroll", classes="hidden"):
                     yield Static("", id="article_view", markup=True)
@@ -186,7 +281,7 @@ class TeletextApp(App):
             with Horizontal(id="fasttext_bar"):
                 for colour, label in FASTTEXT_LABELS.items():
                     yield Button(label, id=f"fasttext_{colour}")
-            yield Input(placeholder="P100", id="dialer")
+            yield DialingInput(placeholder="P100", id="dialer")
 
     def on_mount(self) -> None:
         self._apply_width()
@@ -211,7 +306,12 @@ class TeletextApp(App):
 
     def _apply_width(self) -> None:
         try:
-            self.query_one("#teletext_screen").styles.width = min(CLASSIC_WIDTH, max(1, self.size.width)) if self.classic_mode else "100%"
+            frame = self.query_one("#teletext_screen")
+            frame.styles.width = min(CLASSIC_WIDTH, max(1, self.size.width)) if self.classic_mode else "100%"
+            # Fixed Teletext viewport on sufficiently tall terminals.
+            # Retain a usable scrollable interface on smaller terminal windows.
+            frame.styles.height = min(25, max(1, self.size.height)) if self.classic_mode else "100%"
+            frame.set_class(self.classic_mode, "classic")
         except Exception:
             pass  # Widget may not be mounted during the first resize event.
 
@@ -230,7 +330,17 @@ class TeletextApp(App):
         except NoMatches:
             # The timer can be scheduled just as Textual dismantles the screen.
             return
-        if self.auto_rotate and self.view_mode == "list" and time.monotonic() >= self.next_rotation:
+        if (
+            self.auto_refresh_seconds and not self.fetching
+            and self.view_mode in ("list", "article")
+            and self.current_page_id != "100"
+            and time.monotonic() >= self.next_auto_refresh
+        ):
+            self.action_refresh()
+        if self.classic_mode:
+            self._render_classic()
+        if (self.auto_rotate and not self.hold_page and self.view_mode == "list"
+                and time.monotonic() >= self.next_rotation):
             self.next_rotation = time.monotonic() + self.rotation_seconds
             self._change_subpage(1, record_history=False)
 
@@ -252,6 +362,8 @@ class TeletextApp(App):
     def _signal(self) -> str:
         if self.current_page_id == "100":
             return "INDEX"
+        if self.current_page_id == "902":
+            return "INFO"
         if self.fetching:
             return "TUNING"
         snapshot = self.feed_cache.get(self.current_page_id)
@@ -281,12 +393,80 @@ class TeletextApp(App):
         self.query_one("#sub_header", Static).update(header)
 
     def _toggle_views(self, *, list_view=False, article=False, loading=False) -> None:
-        self.query_one("#main_list").set_class(not list_view, "hidden")
-        self.query_one("#directory_header").set_class(not (list_view and self.view_mode == "index"), "hidden")
-        self.query_one("#article_scroll").set_class(not article, "hidden")
-        self.query_one("#loading_msg").set_class(not loading, "hidden")
+        classic = self.classic_mode
+        self.query_one("#classic_page").set_class(not classic, "hidden")
+        self.query_one("#main_list").set_class(classic or not list_view, "hidden")
+        self.query_one("#directory_header").set_class(classic or not (list_view and self.view_mode == "index"), "hidden")
+        self.query_one("#article_scroll").set_class(classic or not article, "hidden")
+        self.query_one("#loading_msg").set_class(classic or not loading, "hidden")
         self.update_header()
         self._update_sub_header()
+        if classic:
+            self._render_classic()
+            self.query_one("#classic_page", ClassicTeletextScreen).focus()
+
+    def _render_classic(self) -> None:
+        if not self.classic_mode:
+            return
+        displayed = self.displayed_indices if self.view_mode == "list" else []
+        selected = self._classic_index_selection if self.view_mode == "index" else self.selected_entry
+        if self.view_mode == "list" and selected not in displayed and displayed:
+            selected = displayed[0]
+        title = self.pages.get(self.current_page_id, ["NO SIGNAL"])[0]
+        page = compose_classic(
+            page_id=self.current_page_id, mode=self.view_mode, page_title=title,
+            pages=self.pages, index_mapping=self.index_mapping,
+            entries=self.entries, displayed_indices=displayed,
+            current_subpage=self.current_subpage, selected_index=selected,
+            fasttext_pages=self.fasttext_pages, reading=self.reading,
+            reveal=self.reveal, index_subpage=self._classic_index_page,
+            message=self._error_text or ("TUNING..." if self.fetching else "NO SIGNAL"),
+            signal=self._signal(), hold=self.hold_page,
+        )
+        self._classic_hits = page.hit_regions
+        self.query_one("#classic_page", ClassicTeletextScreen).update(
+            page.grid.rich(reveal=self.reveal, flash_on=(int(time.time()) % 2 == 0))
+        )
+
+    def classic_key(self, key: str) -> None:
+        if not self.classic_mode:
+            return
+        if key == "enter":
+            if self.view_mode == "index":
+                if 0 <= self._classic_index_selection < len(self.index_mapping):
+                    self.load_page(self.index_mapping[self._classic_index_selection])
+            elif self.view_mode == "list" and 0 <= self.selected_entry < len(self.entries):
+                self._navigate(PageState(self.current_page_id, "article", self.current_subpage, self.selected_entry))
+            return
+        offset = -1 if key == "up" else 1
+        if self.view_mode == "index" and self.index_mapping:
+            self._classic_index_selection = max(0, min(len(self.index_mapping) - 1,
+                                                          self._classic_index_selection + offset))
+            self._classic_index_page = self._classic_index_selection // INDEX_PER_PAGE
+        elif self.view_mode == "list" and self.displayed_indices:
+            try:
+                position = self.displayed_indices.index(self.selected_entry)
+            except ValueError:
+                position = 0
+            self.selected_entry = self.displayed_indices[max(0, min(
+                len(self.displayed_indices) - 1, position + offset))]
+        self._render_classic()
+
+    def classic_click(self, x: int, y: int) -> None:
+        if not self.classic_mode:
+            return
+        if y == 24 and 0 <= x < 40:
+            self.action_fasttext(("red", "green", "yellow", "cyan")[x // 10])
+            return
+        for start, stop, index in self._classic_hits.get(y, []):
+            if not start <= x < stop:
+                continue
+            if self.view_mode == "index":
+                self._classic_index_selection = index
+            else:
+                self.selected_entry = index
+            self.classic_key("enter")
+            return
 
     def display_index(self) -> None:
         self.view_mode = "index"
@@ -311,13 +491,16 @@ class TeletextApp(App):
             line = f" [white]{escape(name)}[/white] [yellow]{dots}[/yellow] [cyan]{page}[/cyan]"
             lst.append(ListItem(Label(line, markup=True)))
             self.index_mapping.append(page)
+        self._classic_index_page = 0
+        self._classic_index_selection = 0
         self._toggle_views(list_view=True)
         if self.index_mapping:
             lst.index = 0
-        lst.focus()
+        if not self.classic_mode:
+            lst.focus()
 
     def _capture_state(self) -> PageState:
-        if self.view_mode == "list":
+        if self.view_mode == "list" and not self.classic_mode:
             idx = self.query_one("#main_list", ListView).index
             if idx is not None and idx < len(self.displayed_indices):
                 self.selected_entry = self.displayed_indices[idx]
@@ -348,15 +531,41 @@ class TeletextApp(App):
             self.request_id += 1
             self.show_error(state.page_id, "PAGE DOES NOT EXIST", self.request_id)
             return
+        self._refresh_article_key = None
+        self._error_text = ""
         self.current_page_id = state.page_id
         self.current_subpage = state.subpage
         self.selected_entry = state.selected_entry
+        if state.page_id not in self.feed_cache:
+            persisted = load_cached_feed(state.page_id)
+            if persisted is not None and persisted.url == self.pages[state.page_id][1]:
+                self.feed_cache[state.page_id] = FeedSnapshot(
+                    persisted.entries, persisted.fetched_at, persisted.source,
+                    etag=persisted.etag, last_modified=persisted.last_modified,
+                )
         self.served_from_cache = state.page_id in self.feed_cache
         self.entries = self.feed_cache[state.page_id].entries if self.served_from_cache else []
         self.view_mode = state.mode
         self.next_rotation = time.monotonic() + self.rotation_seconds
+        self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
         self.fetching = False
         self.request_id += 1  # invalidate callbacks from older pages/requests
+        if state.page_id == "902":
+            self.view_mode = "help"
+            self._render_help()
+            return
+        if state.page_id == "901":
+            self.render_feed("901", self.reading.bookmarked_entries(), "SAVED STORIES", self.request_id)
+            if state.mode == "article" and 0 <= state.selected_entry < len(self.entries):
+                self.selected_entry = state.selected_entry
+                self._render_article()
+            return
+        if state.page_id == "900":
+            if self.entries and state.mode == "article" and 0 <= state.selected_entry < len(self.entries):
+                self._render_article()
+                return
+            self._show_newswire()
+            return
         if not self.entries:
             self._toggle_views(loading=True)
             self.fetching = True
@@ -369,45 +578,197 @@ class TeletextApp(App):
             self._render_list()
 
     def load_page(self, page_id: str) -> None:
-        if page_id == "100":
-            self._navigate(PageState("100", "index"))
-        elif page_id not in self.pages:
-            # Invalid dialling must invalidate the previous channel's worker.
-            # Otherwise a pending feed can repaint this error screen.
-            self.request_id += 1
-            self.current_page_id = page_id
-            self.current_subpage = 0
-            self.selected_entry = -1
-            self.entries = []
-            self.view_mode = "error"
-            self.fetching = False
-            self.served_from_cache = False
-            self.show_error(page_id, "PAGE DOES NOT EXIST", self.request_id)
-        else:
-            self._navigate(PageState(page_id))
+        # Invalid pages must be navigable history states as well.
+        self._navigate(PageState(page_id, "index" if page_id == "100" else "list"))
 
-    @work(thread=True)
+    def _render_help(self) -> None:
+        self.view_mode = "help"
+        self.entries = []
+        self.fetching = False
+        self.query_one("#article_view", Static).update(
+            "[b yellow]CEETEX HELP • PAGE 902[/b yellow]\n\n"
+            "P100 DIRECTORY  •  P900 NEWSWIRE  •  P901 BOOKMARKS\n"
+            "0–9 DIAL PAGE  •  F1–F4 FASTTEXT\n"
+            "UP/DOWN SELECT  •  ENTER OPEN ARTICLE\n"
+            "N/P SUBPAGE  •  A AUTO ROTATION  •  H HOLD\n"
+            "B BOOKMARK  •  O OPEN WEB  •  V REVEAL\n"
+            "M CLASSIC DISPLAY  •  ESC RETURN\n\n"
+            "Toggle classic mode (M) for the interactive 40×25 page."
+        )
+        self._toggle_views(article=True)
+
+    def _show_newswire(self) -> None:
+        """Show existing cached headlines immediately, then update online."""
+        sources = []
+        for page_id, (name, url) in list(self.pages.items()):
+            if not url:
+                continue
+            cached = self.feed_cache.get(page_id)
+            if cached is None:
+                saved = load_cached_feed(page_id)
+                if saved is not None and saved.url == url:
+                    cached = FeedSnapshot(saved.entries, saved.fetched_at, saved.source,
+                                          etag=saved.etag, last_modified=saved.last_modified)
+            if cached is not None:
+                sources.append((page_id, name, cached.entries))
+        combined = merge_feeds(sources)
+        if combined:
+            self.render_feed("900", combined, "CEETEX NEWSWIRE", self.request_id)
+        else:
+            self._toggle_views(loading=True)
+        self.fetching = True
+        self.fetch_wire(self.request_id)
+
+    @work(thread=True, group="newswire", exclusive=True)
+    def fetch_wire(self, request_id: int) -> None:
+        """Refresh up to 24 feeds concurrently, never blocking the event loop."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        sources = [
+            (page, name, url) for page, (name, url) in self.pages.items()
+            if url and page not in ("100", "900", "901")
+        ][:MAX_WIRE_SOURCES]
+
+        def download(channel):
+            page, name, url = channel
+            cached = self.feed_cache.get(page)
+            if cached is None:
+                persisted = load_cached_feed(page)
+                if persisted is not None and persisted.url == url:
+                    cached = FeedSnapshot(persisted.entries, persisted.fetched_at, persisted.source,
+                                          etag=persisted.etag, last_modified=persisted.last_modified)
+            try:
+                response = fetch_http_feed(url, etag=cached.etag if cached else None,
+                                           last_modified=cached.last_modified if cached else None)
+                if response.not_modified:
+                    if cached is None:
+                        return None
+                    entries = cached.entries
+                else:
+                    parsed = feedparser.parse(response.body)
+                    entries = list(parsed.entries)
+                if not entries:
+                    return (page, name, cached.entries) if cached else None
+                if not response.not_modified:
+                    save_cached_feed(page, entries, time.time(), name, url,
+                                     response.etag, response.last_modified)
+                return (page, name, entries)
+            except Exception:
+                return (page, name, cached.entries) if cached else None
+
+        completed = []
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            jobs = [pool.submit(download, source) for source in sources]
+            for future in as_completed(jobs):
+                result = future.result()
+                if result is not None:
+                    completed.append(result)
+        # Concurrent completion order is nondeterministic; ensure stories
+        # without publication dates remain in stable channel order.
+        completed.sort(key=lambda source: source[0])
+        combined = merge_feeds(completed)
+        if combined:
+            self.call_from_thread(self.render_feed, "900", combined, "CEETEX NEWSWIRE", request_id)
+        else:
+            self.call_from_thread(self.show_error, "900", "NO NEWSWIRE FEEDS AVAILABLE", request_id)
+
+    @work(thread=True, exclusive=True)
     def fetch_feed(self, page_id: str, url: str, request_id: int) -> None:
+        """Fetch off the UI thread; outdated worker callbacks are discarded."""
         try:
-            feed = feedparser.parse(url)
+            cached = self.feed_cache.get(page_id)
+            result = fetch_http_feed(
+                url,
+                etag=cached.etag if cached is not None else None,
+                last_modified=cached.last_modified if cached is not None else None,
+            )
+            if result.not_modified:
+                if cached is None:
+                    raise ValueError("Received HTTP 304 without a cached feed")
+                self.call_from_thread(
+                    self.revalidate_feed, page_id, request_id,
+                    result.etag, result.last_modified,
+                )
+                return
+            feed = feedparser.parse(result.body)
             if not feed.entries:
                 self.call_from_thread(self.show_error, page_id, "NO DATA RECEIVED ON THIS CHANNEL", request_id)
                 return
             entries = list(feed.entries)
             source = str(feed.feed.get("title", self.pages[page_id][0]))
-            self.call_from_thread(self.render_feed, page_id, entries, source, request_id)
+            self.call_from_thread(
+                self.render_feed, page_id, entries, source, request_id,
+                result.etag, result.last_modified,
+            )
         except Exception as exc:
-            self.call_from_thread(self.show_error, page_id, f"CONNECTION ERROR: {exc}", request_id)
+            self.call_from_thread(self.show_error, page_id, describe_feed_error(exc), request_id)
 
     def _request_matches(self, page_id: str, request_id: int) -> bool:
         """Only the currently displayed page's newest request may update UI."""
         return page_id == self.current_page_id and request_id == self.request_id
 
-    def render_feed(self, page_id: str, entries: list, source: str, request_id: int) -> None:
+    def revalidate_feed(
+        self, page_id: str, request_id: int,
+        etag: str | None, last_modified: str | None,
+    ) -> None:
+        """An HTTP 304 confirms cached entries are still current."""
         if not self._request_matches(page_id, request_id):
             return
-        self.feed_cache[page_id] = FeedSnapshot(entries, time.time(), source)
+        cached = self.feed_cache.get(page_id)
+        if cached is None:
+            self.show_error(page_id, "NO CACHED FEED TO REVALIDATE", request_id)
+            return
+        self._refresh_article_key = None
+        cached.fetched_at = time.time()
+        cached.offline = False
+        cached.etag = etag or cached.etag
+        cached.last_modified = last_modified or cached.last_modified
+        save_cached_feed(
+            page_id, cached.entries, cached.fetched_at, cached.source,
+            self.pages[page_id][1], cached.etag, cached.last_modified,
+        )
+        self.entries = cached.entries
+        self.fetching = False
+        self.served_from_cache = True
+        if self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries):
+            self._render_article()
+        else:
+            self._render_list()
+
+    def render_feed(
+        self, page_id: str, entries: list, source: str, request_id: int,
+        etag: str | None = None, last_modified: str | None = None,
+    ) -> None:
+        if not self._request_matches(page_id, request_id):
+            return
+        snapshot = FeedSnapshot(
+            entries, time.time(), source, etag=etag, last_modified=last_modified,
+        )
+        self.feed_cache[page_id] = snapshot
+        if page_id not in ("900", "901"):
+            save_cached_feed(
+                page_id, entries, snapshot.fetched_at, source,
+                self.pages[page_id][1], etag, last_modified,
+            )
+        previous_key = self._refresh_article_key
+        if previous_key is None and self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries):
+            previous_key = article_identity(self.entries[self.selected_entry])
+        if self.view_mode == "article" and previous_key is not None:
+            index = next(
+                (i for i, entry in enumerate(entries)
+                 if article_identity(entry) == previous_key),
+                None,
+            )
+            if index is None:
+                # Never display a different story just because a feed reordered.
+                self.view_mode = "list"
+                self.selected_entry = -1
+                self.notify("STORY NO LONGER IN THIS FEED", severity="warning")
+            else:
+                self.selected_entry = index
+        self._refresh_article_key = None
         self.entries = entries
+        self._error_text = ""
         self.fetching = False
         self.served_from_cache = False
         if self.view_mode == "article" and 0 <= self.selected_entry < len(entries):
@@ -428,19 +789,28 @@ class TeletextApp(App):
         lst = self.query_one("#main_list", ListView)
         lst.clear()
         self.displayed_indices = []
-        latest = escape((clean_feed_text(self.entries[0].get("title")) or "UNTITLED").upper())
+        latest = escape((clean_feed_text(self.entries[0].get("title")) or "UNTITLED").upper()) if self.entries else "NO HEADLINES"
         self.query_one("#ticker_tape", Static).update(f" [b yellow]LATEST:[/b yellow] {latest}")
         for global_idx, entry in subpage_entries(self.entries, self.current_subpage, self.page_size):
             title = (clean_feed_text(entry.get("title")) or "UNTITLED").upper()
-            title = textwrap.shorten(title, width=self.content_width, placeholder="…")
-            lst.append(ListItem(Label(f"[cyan]█[/cyan] [white]{escape(title)}[/white]", markup=True)))
+            source = str(entry.get("source_page", ""))
+            prefix = f"P{source} " if source else ""
+            unread = not self.reading.is_read(self.current_page_id, entry)
+            saved = self.reading.is_bookmarked(self.current_page_id, entry)
+            title = textwrap.shorten(prefix + title, width=self.content_width - 2, placeholder="…")
+            glyph = "◆" if saved else ("●" if unread else "·")
+            colour = "yellow" if saved else ("cyan" if unread else "white")
+            lst.append(ListItem(Label(f"[{colour}]{glyph}[/{colour}] [white]{escape(title)}[/white]", markup=True)))
             self.displayed_indices.append(global_idx)
+        if self.classic_mode and self.displayed_indices and self.selected_entry not in self.displayed_indices:
+            self.selected_entry = self.displayed_indices[0]
         self._toggle_views(list_view=True)
         if self.selected_entry in self.displayed_indices:
             lst.index = self.displayed_indices.index(self.selected_entry)
         elif self.displayed_indices:
             lst.index = 0
-        lst.focus()
+        if not self.classic_mode:
+            lst.focus()
 
     def _render_article(self) -> None:
         if not (0 <= self.selected_entry < len(self.entries)):
@@ -449,6 +819,8 @@ class TeletextApp(App):
             return
         self.view_mode = "article"
         entry = self.entries[self.selected_entry]
+        if self.reading.mark_read(self.current_page_id, entry):
+            self.reading.save()
         title = (clean_feed_text(entry.get("title")) or "UNTITLED").upper()
         summary = clean_feed_text(
             entry.get("summary", entry.get("description", "NO DETAILS PROVIDED.")),
@@ -458,13 +830,16 @@ class TeletextApp(App):
         title = textwrap.fill(title, width=width)
         summary = textwrap.fill(summary, width=width)
         view = self.query_one("#article_view", Static)
-        view.update(f"[b cyan]{escape(title)}[/b cyan]\n\n[white]{escape(summary)}[/white]\n\n[b yellow]O: FULL STORY   ESC: BACK[/b yellow]")
+        saved = "REMOVE BOOKMARK" if self.reading.is_bookmarked(self.current_page_id, entry) else "BOOKMARK"
+        view.update(f"[b cyan]{escape(title)}[/b cyan]\n\n[white]{escape(summary)}[/white]\n\n[b yellow]O: WEB  B: {saved}  ESC: BACK[/b yellow]")
         self._toggle_views(article=True)
 
     def show_error(self, page_id: str, message: str, request_id: int | None = None) -> None:
         if request_id is not None and not self._request_matches(page_id, request_id):
             return
         self.fetching = False
+        self._refresh_article_key = None
+        self._error_text = message
         cached = self.feed_cache.get(page_id)
         if cached is not None:
             cached.offline = True
@@ -503,7 +878,44 @@ class TeletextApp(App):
         if target:
             self.load_page(target)
 
+    def action_newswire(self) -> None:
+        self.load_page("900")
+
+    def action_bookmarks(self) -> None:
+        self.load_page("901")
+
+    def action_bookmark(self) -> None:
+        if self.view_mode != "article" or not (0 <= self.selected_entry < len(self.entries)):
+            return
+        entry = dict(self.entries[self.selected_entry])
+        if not entry.get("source_page"):
+            entry["source_page"] = self.current_page_id
+        if not entry.get("source_name"):
+            entry["source_name"] = self.pages.get(self.current_page_id, ["CEETEX"])[0]
+        stored = self.reading.toggle_bookmark(self.current_page_id, entry)
+        self.reading.save()
+        self.notify("STORY BOOKMARKED" if stored else "BOOKMARK REMOVED")
+        self._render_article()
+
+    def action_reveal(self) -> None:
+        self.reveal = not self.reveal
+        if self.classic_mode:
+            self._render_classic()
+        self.notify("REVEAL ON" if self.reveal else "REVEAL OFF")
+
+    def action_hold(self) -> None:
+        self.hold_page = not self.hold_page
+        if not self.hold_page:
+            self.next_rotation = time.monotonic() + self.rotation_seconds
+        self.notify("HOLD" if self.hold_page else "HOLD RELEASED")
+
     def _change_subpage(self, offset: int, *, record_history: bool = True) -> None:
+        if self.view_mode == "index" and self.classic_mode and self.index_mapping:
+            total = page_count(len(self.index_mapping), INDEX_PER_PAGE)
+            self._classic_index_page = next_subpage(self._classic_index_page, total, offset)
+            self._classic_index_selection = self._classic_index_page * INDEX_PER_PAGE
+            self._render_classic()
+            return
         if self.view_mode != "list" or not self.entries:
             return
         total = page_count(len(self.entries), self.page_size)
@@ -531,6 +943,14 @@ class TeletextApp(App):
         self.notify("AUTO SUBPAGES ON" if self.auto_rotate else "AUTO SUBPAGES OFF")
 
     def action_toggle_classic(self) -> None:
+        if self.view_mode == "list" and not self.classic_mode:
+            # Convert the highlighted row to its global article index BEFORE
+            # changing the number of entries per subpage.
+            list_index = self.query_one("#main_list", ListView).index
+            if list_index is not None and 0 <= list_index < len(self.displayed_indices):
+                self.selected_entry = self.displayed_indices[list_index]
+            elif self.selected_entry < 0:
+                self.selected_entry = self.current_subpage * self.page_size
         self.classic_mode = not self.classic_mode
         self._apply_width()
         if self.view_mode == "index":
@@ -541,7 +961,11 @@ class TeletextApp(App):
                 self.current_subpage = self.selected_entry // self.page_size
             self._render_list()
         elif self.view_mode == "article":
+            if self.selected_entry >= 0:
+                self.current_subpage = self.selected_entry // self.page_size
             self._render_article()
+        elif self.view_mode in ("error", "help"):
+            self._toggle_views(article=True)
         self.notify("40-COLUMN MODE" if self.classic_mode else "RESPONSIVE MODE")
 
     def action_history_back(self) -> None:
@@ -573,11 +997,30 @@ class TeletextApp(App):
         self._clear_dialer(focus=False)
 
     def action_refresh(self) -> None:
-        if self.current_page_id == "100" or self.current_page_id not in self.pages:
+        if self.current_page_id in ("100", "902") or self.current_page_id not in self.pages:
             return
+        if self.current_page_id == "901":
+            self.request_id += 1
+            self.render_feed("901", self.reading.bookmarked_entries(), "SAVED STORIES", self.request_id)
+            return
+        if self.current_page_id == "900":
+            self.request_id += 1
+            self.fetching = True
+            self.fetch_wire(self.request_id)
+            return
+        self._refresh_article_key = (
+            article_identity(self.entries[self.selected_entry])
+            if self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries)
+            else None
+        )
         self.request_id += 1
         self.fetching = True
-        self._toggle_views(loading=True)
+        self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
+        if self.current_page_id in self.feed_cache:
+            # Retain readable cached headlines/article while revalidating.
+            self._update_sub_header()
+        else:
+            self._toggle_views(loading=True)
         self.fetch_feed(self.current_page_id, self.pages[self.current_page_id][1], self.request_id)
 
     def action_open_browser(self) -> None:
@@ -587,30 +1030,54 @@ class TeletextApp(App):
         if urlparse(url).scheme in ("http", "https"):
             webbrowser.open(url)
 
+    def action_dial_digit(self, digit: str) -> None:
+        """Process page digits independently of Textual input focus timing."""
+        if len(digit) != 1 or digit not in "0123456789":
+            return
+        self._dial_digits = (self._dial_digits + digit)[-3:]
+        dialer = self.query_one("#dialer", Input)
+        dialer.value = self._dial_digits
+        if len(self._dial_digits) == 3:
+            self.load_page(self._dial_digits)
+            self.call_after_refresh(lambda: self._clear_dialer(focus=False))
+        else:
+            dialer.focus()
+
     def on_key(self, event) -> None:
-        if event.character and event.character.isascii() and event.character.isdigit():
-            dialer = self.query_one("#dialer", Input)
-            if not dialer.has_focus:
-                dialer.focus()
-                dialer.value += event.character
-                event.stop()
+        if (
+            event.character and len(event.character) == 1
+            and event.character in "0123456789"
+            and not self.query_one("#dialer", Input).has_focus
+        ):
+            self.action_dial_digit(event.character)
+            event.prevent_default()
+            event.stop()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "dialer":
             return
         value = event.value
+        if value == self._dial_digits:
+            return  # Synthetic Input.Changed from the controlled key buffer.
         if len(value) == 3 and value.isascii() and value.isdigit():
+            self._dial_digits = value
             self.load_page(value)
-            self.call_after_refresh(self._clear_dialer)
+            self.call_after_refresh(lambda: self._clear_dialer(focus=False))
         elif len(value) >= 3:
             self._clear_dialer()
 
     def _clear_dialer(self, *, focus: bool = True) -> None:
+        self._dial_digits = ""
         dialer = self.query_one("#dialer", Input)
         dialer.value = ""
         if focus:
             dialer.focus()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for both python ceetex.py and the installed CLI."""
     TeletextApp().run()
+
+
+if __name__ == "__main__":
+    main()

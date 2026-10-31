@@ -1,0 +1,23 @@
+{
+    "100": ["INDEX", ""],
+    "101": ["NEWS HEADLINES", "https://feeds.bbci.co.uk/news/rss.xml"],
+    "102": ["WEATHER", "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/2643743"],
+    "110": ["TELEVISION", "https://www.theguardian.com/tv-and-radio/rss"],
+    "123": ["LOTTERY", "https://www.national-lottery.co.uk/results/lotto/rss"],
+    "130": ["SPORT", "https://feeds.bbci.co.uk/news/sport/rss.xml"],
+    "140": ["TEENS MAGAZINE", "https://www.teenvogue.com/feed/rss"],
+    "150": ["GAMES", "https://www.eurogamer.net/feed/news"],
+    "160": ["ENVIRONMENT", "https://www.theguardian.com/environment/rss"],
+    "170": ["COMPUTER GAMES", "https://www.pcgamer.com/rss/"],
+    "190": ["ROADS/TRAVEL", "https://www.trafficengland.com/rss/roadworks.xml"],
+    "200": ["FINANCE", "https://feeds.bbci.co.uk/news/business/rss.xml"],
+    "230": ["FLIGHTS", "https://www.flightradar24.com/blog/feed/"],
+    "300": ["UK/WORLD NEWS", "https://feeds.bbci.co.uk/news/world/rss.xml"],
+    "400": ["ENTERTAINMENT", "https://www.digitalspy.com/rss/all/"],
+    "450": ["THEATRE", "https://www.thestage.co.uk/rss/news"],
+    "460": ["CINEMAS", "https://www.empireonline.com/rss/"],
+    "480": ["MUSIC", "https://www.nme.com/feed"],
+    "500": ["HACKER NEWS", "https://news.ycombinator.com/rss"],
+    "600": ["CULTURE", "https://www.theguardian.com/uk/culture/rss"],
+    "660": ["EDUCATION", "https://www.theguardian.com/education/rss"]
+}

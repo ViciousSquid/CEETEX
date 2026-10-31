@@ -11,6 +11,17 @@ from ceetex import TeletextApp, STALE_SECONDS
 from textual.widgets import ListView
 
 
+@pytest.fixture(autouse=True)
+def isolated_feed_disk_cache(tmp_path, monkeypatch):
+    """Ensure headless interaction tests do not share persistent feed state."""
+    monkeypatch.setattr(
+        "ceetex_cache.user_cache_dir", lambda *a, **kw: str(tmp_path / "cache"),
+    )
+    monkeypatch.setattr(
+        "ceetex_reading.user_data_dir", lambda *a, **kw: str(tmp_path / "reading"),
+    )
+
+
 def fixture_entries(count=24):
     return [{"title": f"Headline {i} [yellow]", "summary": f"Summary {i}", "link": f"https://example.org/{i}"} for i in range(count)]
 
@@ -50,7 +61,7 @@ async def test_subpages_classic_and_history_without_reload():
             await pilot.press("n")
             assert app.current_subpage == 0
             lst = app.query_one("#main_list", ListView)
-            lst.index = 2
+            app.selected_entry = 2
             await pilot.press("enter")
             assert app.view_mode == "article"
             assert app.selected_entry == 2
@@ -279,7 +290,7 @@ def test_invalid_config_entries_cannot_break_index(tmp_path, monkeypatch):
     monkeypatch.setattr("ceetex.ROOT", bundle)
     monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
     app = TeletextApp()
-    assert sorted(app.pages) == ["100", "101"]
+    assert sorted(app.pages) == ["100", "101", "900", "901", "902"]
     assert len(app.config_warnings) == 4
 
 
@@ -302,3 +313,203 @@ async def test_history_can_restore_invalid_page_without_fetch_or_crash():
             await pilot.press("ctrl+right")
             assert app.current_page_id == "100"
             assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_channel_is_a_real_history_entry():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(3), "NEWS", app.request_id)
+            app.load_page("999")
+            assert app.view_mode == "error"
+            await pilot.press("ctrl+left")
+            assert app.current_page_id == "101"
+            assert app.view_mode == "list"
+            await pilot.press("ctrl+right")
+            assert app.current_page_id == "999"
+            assert app.view_mode == "error"
+
+
+@pytest.mark.asyncio
+async def test_classic_mode_keeps_highlighted_global_article():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(40), "NEWS", app.request_id)
+            await pilot.press("n")
+            lst = app.query_one("#main_list", ListView)
+            lst.index = 3   # global article 18 on responsive subpage 2
+            await pilot.press("m")
+            assert app.classic_mode
+            assert app.current_subpage == 2
+            assert app.selected_entry == 18
+            assert lst.index == 0
+            await pilot.press("m")
+            assert not app.classic_mode
+            assert app.current_subpage == 1
+            assert lst.index == 3
+
+
+@pytest.mark.asyncio
+async def test_dialled_channel_finishes_with_list_focus():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.feed_cache["101"] = __import__("ceetex").FeedSnapshot(
+                fixture_entries(3), time.time(), "NEWS",
+            )
+            # Let Textual settle the initial ListView focus before typing.
+            await pilot.pause()
+            assert app.query_one("#main_list", ListView).has_focus
+            await pilot.press("1", "0", "1")
+            await pilot.pause()
+            assert app.current_page_id == "101", (
+                app.query_one("#dialer").value,
+                app.focused.id if app.focused else None,
+                [(x.page_id, x.mode) for x in app.history],
+            )
+            assert app.query_one("#main_list", ListView).has_focus
+
+
+@pytest.mark.asyncio
+async def test_refresh_keeps_story_identity_when_feed_reorders_or_removes_it():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            items = [
+                {"id": f"guid-{i}", "title": f"Story {i}", "summary": "Text"}
+                for i in range(3)
+            ]
+            app.load_page("101")
+            app.render_feed("101", items, "NEWS", app.request_id)
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            assert app.selected_entry == 1
+            app.action_refresh()
+            app.render_feed("101", [items[1], items[2], items[0]], "NEWS", app.request_id)
+            assert app.view_mode == "article"
+            assert app.selected_entry == 0
+            app.action_refresh()
+            app.render_feed("101", [items[0], items[2]], "NEWS", app.request_id)
+            assert app.view_mode == "list"
+            assert app.selected_entry == -1
+
+
+@pytest.mark.asyncio
+async def test_304_revalidation_preserves_open_story_and_clears_offline_flag():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(2), "NEWS", app.request_id, '"old"')
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            app.feed_cache["101"].offline = True
+            app.action_refresh()
+            app.revalidate_feed("101", app.request_id, '"new"', None)
+            assert app.view_mode == "article"
+            assert app.selected_entry == 1
+            assert not app.feed_cache["101"].offline
+            assert app.feed_cache["101"].etag == '"new"'
+            assert app._signal() == "CACHED"
+
+
+def test_invalid_feed_url_ignored_with_warning(tmp_path, monkeypatch):
+    import json
+    (tmp_path / "pages.json").write_text(json.dumps({
+        "101": ["NEWS", "https://example.org/rss"],
+        "102": ["LOCAL", "file:///etc/passwd"],
+        "103": ["BROKEN", "javascript:alert(1)"],
+    }))
+    monkeypatch.setattr("ceetex.ROOT", tmp_path)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    app = TeletextApp()
+    assert sorted(app.pages) == ["100", "101", "900", "901", "902"]
+    assert any("invalid feed URL" in msg for msg in app.config_warnings)
+    assert all(page in app.pages for page in app.fasttext_pages.values())
+
+
+def test_invalid_settings_generate_warnings(tmp_path, monkeypatch):
+    (tmp_path / "settings.json").write_text(
+        '{"auto_subpages": "yes", "classic_mode": 1, "rotation_seconds": -20}'
+    )
+    monkeypatch.setattr("ceetex.ROOT", tmp_path)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    app = TeletextApp()
+    assert len([w for w in app.config_warnings if "settings.json" in w]) == 3
+    assert not app.classic_mode and not app.auto_rotate
+    assert app.rotation_seconds == 10
+
+
+@pytest.mark.asyncio
+async def test_classic_viewport_is_40_by_25_cells_when_terminal_allows():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 35)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            frame = app.query_one("#teletext_screen")
+            assert frame.size.width == 40
+            assert frame.size.height == 25
+            await pilot.press("m")
+            await pilot.pause()
+            assert frame.size.width == 100
+            assert frame.size.height == 35
+
+
+@pytest.mark.asyncio
+async def test_persisted_feed_restores_without_fetch_after_app_restart():
+    calls = []
+    def no_fetch(self, page_id, url, request_id):
+        calls.append(page_id)
+
+    with patch.object(TeletextApp, "fetch_feed", no_fetch):
+        first = TeletextApp()
+        async with first.run_test():
+            first.load_page("500")
+            first.render_feed("500", fixture_entries(3), "HN", first.request_id)
+        second = TeletextApp()
+        async with second.run_test():
+            second.load_page("500")
+            assert second.view_mode == "list"
+            assert second.entries[0]["title"].startswith("Headline")
+            assert second._signal() == "CACHED"
+        assert calls == ["500"]
+
+
+@pytest.mark.asyncio
+async def test_auto_refresh_is_opt_in_and_does_not_blank_open_article():
+    calls = []
+    def no_fetch(self, page_id, url, request_id):
+        calls.append(page_id)
+    with patch.object(TeletextApp, "fetch_feed", no_fetch):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(3), "NEWS", app.request_id)
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            assert app.view_mode == "article"
+            assert not app.auto_refresh_seconds
+            app.auto_refresh_seconds = 60
+            app.next_auto_refresh = 0
+            app._tick()
+            assert app.fetching
+            assert app.view_mode == "article"
+            assert app.query_one("#article_scroll").display
+            app._tick()
+            assert calls == ["101", "101"]
+
+
+def test_auto_refresh_settings_validation(tmp_path, monkeypatch):
+    monkeypatch.setattr("ceetex.ROOT", tmp_path)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    (tmp_path / "settings.json").write_text('{"auto_refresh_seconds": 120}')
+    assert TeletextApp().auto_refresh_seconds == 120
+    (tmp_path / "settings.json").write_text('{"auto_refresh_seconds": 2}')
+    app = TeletextApp()
+    assert app.auto_refresh_seconds == 0
+    assert any("auto_refresh_seconds" in w for w in app.config_warnings)

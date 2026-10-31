@@ -57,3 +57,17 @@ def test_plain_feed_text_removes_markup_scripts_controls_and_ansi():
     assert clean_feed_text("ok\x1b[31mred\x1b[0m\u202e\x00") == "okred"
     assert clean_feed_text(None) == ""
     assert clean_feed_text("A < B and C > D") == "A < B and C > D"
+
+
+def test_articles_keep_identity_across_reordering():
+    from ceetex_core import article_identity
+    assert article_identity({"id": "story-5", "title": "Old"}) == article_identity(
+        {"id": "story-5", "title": "Updated"})
+    assert article_identity({"link": "https://example.org/a"}) != article_identity(
+        {"link": "https://example.org/b"})
+
+
+def test_fasttext_defaults_never_point_to_missing_pages():
+    pages = {"100": ["INDEX", ""], "500": ["HN", "https://example.org/rss"]}
+    defaults = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
+    assert validate_fasttext({}, pages, defaults) == dict.fromkeys(defaults, "500")
