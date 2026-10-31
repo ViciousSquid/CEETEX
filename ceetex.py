@@ -663,6 +663,9 @@ class TeletextApp(App):
                 result = future.result()
                 if result is not None:
                     completed.append(result)
+        # Concurrent completion order is nondeterministic; ensure stories
+        # without publication dates remain in stable channel order.
+        completed.sort(key=lambda source: source[0])
         combined = merge_feeds(completed)
         if combined:
             self.call_from_thread(self.render_feed, "900", combined, "CEETEX NEWSWIRE", request_id)
