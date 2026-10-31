@@ -24,6 +24,7 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text, article_identity
 from ceetex_feed import fetch_http_feed
+from ceetex_cache import load_feed as load_cached_feed, save_feed as save_cached_feed
 
 ROOT = Path(__file__).resolve().parent
 FASTTEXT_DEFAULTS = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
@@ -389,6 +390,13 @@ class TeletextApp(App):
         self.current_page_id = state.page_id
         self.current_subpage = state.subpage
         self.selected_entry = state.selected_entry
+        if state.page_id not in self.feed_cache:
+            persisted = load_cached_feed(state.page_id)
+            if persisted is not None and persisted.url == self.pages[state.page_id][1]:
+                self.feed_cache[state.page_id] = FeedSnapshot(
+                    persisted.entries, persisted.fetched_at, persisted.source,
+                    etag=persisted.etag, last_modified=persisted.last_modified,
+                )
         self.served_from_cache = state.page_id in self.feed_cache
         self.entries = self.feed_cache[state.page_id].entries if self.served_from_cache else []
         self.view_mode = state.mode
@@ -461,6 +469,10 @@ class TeletextApp(App):
         cached.offline = False
         cached.etag = etag or cached.etag
         cached.last_modified = last_modified or cached.last_modified
+        save_cached_feed(
+            page_id, cached.entries, cached.fetched_at, cached.source,
+            self.pages[page_id][1], cached.etag, cached.last_modified,
+        )
         self.entries = cached.entries
         self.fetching = False
         self.served_from_cache = True
@@ -475,8 +487,13 @@ class TeletextApp(App):
     ) -> None:
         if not self._request_matches(page_id, request_id):
             return
-        self.feed_cache[page_id] = FeedSnapshot(
+        snapshot = FeedSnapshot(
             entries, time.time(), source, etag=etag, last_modified=last_modified,
+        )
+        self.feed_cache[page_id] = snapshot
+        save_cached_feed(
+            page_id, entries, snapshot.fetched_at, source,
+            self.pages[page_id][1], etag, last_modified,
         )
         if self.view_mode == "article" and self._refresh_article_key is not None:
             index = next(
