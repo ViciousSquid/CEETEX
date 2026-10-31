@@ -1,25 +1,68 @@
 # CEETEX
+
 #### Ceefax/Teletext engine for modern web feeds
 
-#### A bridge between the high-speed data of 2026 and the low-resolution, "Mode 7" broadcast aesthetic of the 1990s.
+A bridge between today's high-speed data and the low-resolution **Mode 7 Teletext aesthetic**. Customise your RSS channels, dial three-digit pages, and browse the news in a lightweight terminal interface.
 
-_Customise and aggregate your favourite RSS sources without bloat or distracting ads._
+![CEETEX screenshot](https://github.com/user-attachments/assets/87f7e7d5-a9a5-43c9-8ad8-e678f49c1465)
 
-CEETEX solves a modern, real-world problem (internet bloat and ad-fatigue) using a 40-year-old user experience metaphor (Teletext/Ceefax).
+## Install and run
+
+Requires Python 3.11 or newer.
 
 
-<img width="1549" height="934" alt="image" src="https://github.com/user-attachments/assets/87f7e7d5-a9a5-43c9-8ad8-e678f49c1465" />
+~~~sh
+python -m pip install -r requirements.txt
+python ceetex.py
+~~~
 
--------------------------------
+The application loads `pages.json` relative to `ceetex.py`, not the shell's working directory.
 
-CEETEX is a Python-based RSS reader that reimagines modern data through the high-density, no-nonsense lens of 1980s Teletext. Built using the Textual framework, it features a retro 3-digit dialing system and a custom engine that strips away web bloat, delivering a distraction-free, terminal-native news experience."
+## Using CEETEX
 
-"CEETEX brings back the 'information-at-your-fingertips' era of broadcast data services like the UK's Ceefax and Australia's Austext. For those in the US, think of it as a interactive, user-controlled version of the classic 80s Weather Channel dashboard. It’s a nostalgic, high-density way to browse the modern web via the terminal."
+- **Three digits** — dial a channel directly (e.g. `101` for news, `500` for Hacker News).
+- **Click a headline / Enter** — read the feed summary.
+- **O** — open the current story in your browser.
+- **Escape** — return from an article to its headline list; from a list to the main index.
+- **Home** — go to index page 100.
+- **F1 / F2 / F3 / F4** — red NEWS, green SPORT, yellow WEATHER, cyan TRAVEL FastText links. The four colour buttons are also clickable.
+- **N / P** — next or previous numbered subpage. For example, P101/1 and P101/2.
+- **A** — toggle subpage auto-rotation (every 10 seconds when enabled).
+- **M** — toggle an optional centred, **40-character-wide** classic Teletext view. The default is responsive.
+- **Ctrl+Left / Ctrl+Right** — step backwards or forwards through page, subpage, and article history.
+- **R** — refresh the current feed.
+- **Q** — quit.
 
--------------------------------
+The clock updates every second. The signal indicator shows **TUNING**, **LIVE**, **STALE** (older than 15 minutes), **OFFLINE/CACHED** (a refresh failed but earlier data is available), or **NO SIGNAL**.
 
-### `pages.json` stores a list of RSS feeds and codes to view them <br>(Index is 100, BBC news is 101, Hackernews is 500, etc)
+Subpages show nine headlines in 40-column mode or fifteen in responsive mode. Moving between already loaded pages and returning from an article uses the in-memory feed cache rather than downloading again. Press R to request a new copy.
 
-### Click on headlines to view them, Press `O` to open a web browser with full articles
+## Customising channels
 
-requirements: `textual` , `feedparser` , `rich`
+Edit `pages.json` to choose channel numbers, titles, and RSS/Atom feed URLs. The entry for page 100 is the built-in directory.
+
+Optionally, copy `fasttext.example.json` to `fasttext.json` and adjust the page numbers:
+
+
+~~~json
+{
+  "red": "101",
+  "green": "130",
+  "yellow": "102",
+  "cyan": "190"
+}
+~~~
+
+FastText destinations must refer to existing three-digit page numbers in `pages.json`. Invalid overrides fall back to the defaults.
+
+## Tests
+
+
+~~~sh
+python -m pip install -r requirements.txt pytest pytest-asyncio
+python -m pytest -q
+~~~
+
+The tests include pure page-layout logic and headless Textual interaction. GitHub Actions runs these on Linux, macOS, and Windows.
+
+CEETEX is inspired by the UK Ceefax service and similar Teletext systems. This is a modern terminal interpretation, not an implementation of a broadcast decoder.
