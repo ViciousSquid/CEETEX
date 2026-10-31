@@ -48,3 +48,14 @@ def test_story_key_uses_original_channel_not_aggregate_page():
     item = {"id": "xyz", "source_page": "101"}
     assert story_key("101", item) == story_key("900", item)
     assert story_key("101", item) != story_key("102", {"id": "xyz"})
+
+
+def test_read_history_stores_hashes_not_full_article_urls(tmp_path, monkeypatch):
+    monkeypatch.setattr("ceetex_reading.user_data_dir", lambda *a, **kw: str(tmp_path))
+    state = ReadingState()
+    original = {"link": "https://example.org/private-reading-choice"}
+    assert state.mark_read("101", original)
+    assert state.save()
+    serialized = state_path().read_text(encoding="utf-8")
+    assert original["link"] not in serialized
+    assert len(story_key("101", original)) == 64
