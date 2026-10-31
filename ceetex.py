@@ -22,7 +22,7 @@ from textual.containers import Container, Horizontal, VerticalScroll
 from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text
+from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text, article_identity
 from ceetex_feed import fetch_http_feed
 
 ROOT = Path(__file__).resolve().parent
@@ -141,6 +141,7 @@ class TeletextApp(App):
         self.served_from_cache = False
         self.history: list[PageState] = [PageState("100", "index")]
         self.history_position = 0
+        self._refresh_article_key: str | None = None
 
     def load_config(self) -> dict:
         data = read_json_config("pages.json", {"100": ["INDEX", ""]}, self.config_warnings)
@@ -351,6 +352,7 @@ class TeletextApp(App):
             self.request_id += 1
             self.show_error(state.page_id, "PAGE DOES NOT EXIST", self.request_id)
             return
+        self._refresh_article_key = None
         self.current_page_id = state.page_id
         self.current_subpage = state.subpage
         self.selected_entry = state.selected_entry
@@ -372,22 +374,8 @@ class TeletextApp(App):
             self._render_list()
 
     def load_page(self, page_id: str) -> None:
-        if page_id == "100":
-            self._navigate(PageState("100", "index"))
-        elif page_id not in self.pages:
-            # Invalid dialling must invalidate the previous channel's worker.
-            # Otherwise a pending feed can repaint this error screen.
-            self.request_id += 1
-            self.current_page_id = page_id
-            self.current_subpage = 0
-            self.selected_entry = -1
-            self.entries = []
-            self.view_mode = "error"
-            self.fetching = False
-            self.served_from_cache = False
-            self.show_error(page_id, "PAGE DOES NOT EXIST", self.request_id)
-        else:
-            self._navigate(PageState(page_id))
+        # Invalid pages must be navigable history states as well.
+        self._navigate(PageState(page_id, "index" if page_id == "100" else "list"))
 
     @work(thread=True, exclusive=True)
     def fetch_feed(self, page_id: str, url: str, request_id: int) -> None:
@@ -435,6 +423,7 @@ class TeletextApp(App):
         if cached is None:
             self.show_error(page_id, "NO CACHED FEED TO REVALIDATE", request_id)
             return
+        self._refresh_article_key = None
         cached.fetched_at = time.time()
         cached.offline = False
         cached.etag = etag or cached.etag
@@ -456,6 +445,20 @@ class TeletextApp(App):
         self.feed_cache[page_id] = FeedSnapshot(
             entries, time.time(), source, etag=etag, last_modified=last_modified,
         )
+        if self.view_mode == "article" and self._refresh_article_key is not None:
+            index = next(
+                (i for i, entry in enumerate(entries)
+                 if article_identity(entry) == self._refresh_article_key),
+                None,
+            )
+            if index is None:
+                # Never display a different story just because a feed reordered.
+                self.view_mode = "list"
+                self.selected_entry = -1
+                self.notify("STORY NO LONGER IN THIS FEED", severity="warning")
+            else:
+                self.selected_entry = index
+        self._refresh_article_key = None
         self.entries = entries
         self.fetching = False
         self.served_from_cache = False
@@ -514,6 +517,7 @@ class TeletextApp(App):
         if request_id is not None and not self._request_matches(page_id, request_id):
             return
         self.fetching = False
+        self._refresh_article_key = None
         cached = self.feed_cache.get(page_id)
         if cached is not None:
             cached.offline = True
@@ -580,6 +584,14 @@ class TeletextApp(App):
         self.notify("AUTO SUBPAGES ON" if self.auto_rotate else "AUTO SUBPAGES OFF")
 
     def action_toggle_classic(self) -> None:
+        if self.view_mode == "list":
+            # Convert the highlighted row to its global article index BEFORE
+            # changing the number of entries per subpage.
+            list_index = self.query_one("#main_list", ListView).index
+            if list_index is not None and 0 <= list_index < len(self.displayed_indices):
+                self.selected_entry = self.displayed_indices[list_index]
+            elif self.selected_entry < 0:
+                self.selected_entry = self.current_subpage * self.page_size
         self.classic_mode = not self.classic_mode
         self._apply_width()
         if self.view_mode == "index":
@@ -590,6 +602,8 @@ class TeletextApp(App):
                 self.current_subpage = self.selected_entry // self.page_size
             self._render_list()
         elif self.view_mode == "article":
+            if self.selected_entry >= 0:
+                self.current_subpage = self.selected_entry // self.page_size
             self._render_article()
         self.notify("40-COLUMN MODE" if self.classic_mode else "RESPONSIVE MODE")
 
@@ -624,6 +638,11 @@ class TeletextApp(App):
     def action_refresh(self) -> None:
         if self.current_page_id == "100" or self.current_page_id not in self.pages:
             return
+        self._refresh_article_key = (
+            article_identity(self.entries[self.selected_entry])
+            if self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries)
+            else None
+        )
         self.request_id += 1
         self.fetching = True
         self._toggle_views(loading=True)
@@ -650,7 +669,7 @@ class TeletextApp(App):
         value = event.value
         if len(value) == 3 and value.isascii() and value.isdigit():
             self.load_page(value)
-            self.call_after_refresh(self._clear_dialer)
+            self.call_after_refresh(lambda: self._clear_dialer(focus=False))
         elif len(value) >= 3:
             self._clear_dialer()
 
