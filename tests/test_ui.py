@@ -159,3 +159,52 @@ async def test_superseded_requests_cannot_replace_newer_feed_or_error():
             assert "101" not in app.feed_cache
             await pilot.press("escape")
             assert app.current_page_id == "100"
+
+
+@pytest.mark.asyncio
+async def test_article_back_and_page_revisit_restore_cache_selection_and_focus():
+    calls = []
+    def no_fetch(self, page_id, url, request_id):
+        calls.append(page_id)
+
+    with patch.object(TeletextApp, "fetch_feed", no_fetch):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(35), "NEWS", app.request_id)
+            await pilot.press("n")
+            listview = app.query_one("#main_list", ListView)
+            listview.index = 3
+            await pilot.press("enter")
+            assert app.view_mode == "article"
+            assert app.selected_entry == 18
+            await pilot.press("escape")
+            assert app.view_mode == "list"
+            assert app.current_subpage == 1
+            assert listview.index == 3
+            assert listview.has_focus
+            assert calls == ["101"]
+
+            await pilot.press("home")
+            app.load_page("101")
+            assert calls == ["101"]
+            assert app._signal() == "CACHED"
+            await pilot.press("ctrl+left")
+            assert app.current_page_id == "100"
+
+
+@pytest.mark.asyncio
+async def test_failed_article_refresh_keeps_article_visible_offline():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(2), "NEWS", app.request_id)
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            assert app.view_mode == "article"
+            app.action_refresh()
+            app.show_error("101", "OFFLINE", app.request_id)
+            assert app.view_mode == "article"
+            assert app.selected_entry == 1
+            assert app._signal() == "OFFLINE/CACHED"

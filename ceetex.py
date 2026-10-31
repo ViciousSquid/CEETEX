@@ -424,7 +424,12 @@ class TeletextApp(App):
         if cached is not None:
             cached.offline = True
             self.entries = cached.entries
-            self._render_list()
+            # Refreshing an open article must restore that same article even
+            # when the network is unavailable.
+            if self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries):
+                self._render_article()
+            else:
+                self._render_list()
             return
         self.view_mode = "error"
         self.query_one("#article_view", Static).update(
@@ -514,11 +519,13 @@ class TeletextApp(App):
                 self._navigate(PageState(self.current_page_id, "list", self.current_subpage, self.selected_entry))
         else:
             self.load_page("100")
-        self._clear_dialer()
+        # Keep focus on the restored list for immediate Up/Down/Enter;
+        # numeric keys can still focus the dialler from anywhere.
+        self._clear_dialer(focus=False)
 
     def action_go_home(self) -> None:
         self.load_page("100")
-        self._clear_dialer()
+        self._clear_dialer(focus=False)
 
     def action_refresh(self) -> None:
         if self.current_page_id == "100" or self.current_page_id not in self.pages:
@@ -553,10 +560,11 @@ class TeletextApp(App):
         elif len(value) >= 3:
             self._clear_dialer()
 
-    def _clear_dialer(self) -> None:
+    def _clear_dialer(self, *, focus: bool = True) -> None:
         dialer = self.query_one("#dialer", Input)
         dialer.value = ""
-        dialer.focus()
+        if focus:
+            dialer.focus()
 
 
 if __name__ == "__main__":
