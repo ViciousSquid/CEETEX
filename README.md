@@ -27,13 +27,13 @@ The application loads `pages.json` relative to `ceetex.py`, not the shell's work
 - **Home** — go to index page 100.
 - **F1 / F2 / F3 / F4** — red NEWS, green SPORT, yellow WEATHER, cyan TRAVEL FastText links. The four colour buttons are also clickable.
 - **N / P** — next or previous numbered subpage. For example, P101/1 and P101/2.
-- **A** — toggle subpage auto-rotation (every 10 seconds when enabled).
-- **M** — toggle an optional centred, **40-character-wide** classic Teletext view. The default is responsive.
+- **A** — toggle subpage auto-rotation (every 10 seconds by default; configurable).
+- **M** — toggle an optional centred, **40-character-wide** classic Teletext view, with two-row block-character headings. The default is responsive.
 - **Ctrl+Left / Ctrl+Right** — step backwards or forwards through page, subpage, and article history.
 - **R** — refresh the current feed.
 - **Q** — quit.
 
-The clock updates every second. The signal indicator shows **TUNING**, **LIVE**, **STALE** (older than 15 minutes), **OFFLINE/CACHED** (a refresh failed but earlier data is available), or **NO SIGNAL**.
+The clock updates every second. The signal indicator shows **TUNING**, **LIVE**, **CACHED** (revisited without refetching), **STALE** (older than 15 minutes), **OFFLINE/CACHED** (a refresh failed but earlier data is available), or **NO SIGNAL**.
 
 Subpages show nine headlines in 40-column mode or fifteen in responsive mode. Moving between already loaded pages and returning from an article uses the in-memory feed cache rather than downloading again. Press R to request a new copy.
 
@@ -54,6 +54,22 @@ Optionally, copy `fasttext.example.json` to `fasttext.json` and adjust the page 
 ~~~
 
 FastText destinations must refer to existing three-digit page numbers in `pages.json`. Invalid overrides fall back to the defaults.
+
+## Optional display and rotation defaults
+
+Copy `settings.example.json` to `settings.json` and set your startup preferences:
+
+```json
+{
+  "classic_mode": false,
+  "auto_subpages": false,
+  "rotation_seconds": 10
+}
+```
+
+Rotation intervals between 2 and 300 seconds are supported. The **M** and **A** keys toggle their respective features for the running session; they do not rewrite this file.
+
+40-column classic mode uses Unicode block mosaics to approximate double-height Teletext headings. Terminals cannot actually switch their physical character-cell heights, so this is a visual approximation rather than a broadcast Mode 7 renderer.
 
 ## Tests
 
