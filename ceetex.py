@@ -21,7 +21,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext
+from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading
 
 ROOT = Path(__file__).resolve().parent
 FASTTEXT_DEFAULTS = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
@@ -107,6 +107,7 @@ class TeletextApp(App):
         self.next_rotation = time.monotonic() + AUTO_ROTATE_SECONDS
         self.request_id = 0
         self.fetching = False
+        self.served_from_cache = False
         self.history: list[PageState] = [PageState("100", "index")]
         self.history_position = 0
 
@@ -187,6 +188,10 @@ class TeletextApp(App):
         if self.current_page_id == "100":
             widget.update(prefix + "\n" + CEETEX_LOGO)
             widget.styles.height = 7
+        elif self.classic_mode:
+            title = str(self.pages.get(self.current_page_id, ("CHANNEL", ""))[0])
+            widget.update(f"{prefix}\n[b white]{escape(mosaic_heading(title, min(CLASSIC_WIDTH, max(1, self.size.width))))}[/b white]")
+            widget.styles.height = 3
         else:
             widget.update(prefix)
             widget.styles.height = 1
@@ -201,7 +206,9 @@ class TeletextApp(App):
             return "NO SIGNAL"
         if snapshot.offline:
             return "OFFLINE/CACHED"
-        return "STALE" if time.time() - snapshot.fetched_at >= STALE_SECONDS else "LIVE"
+        if time.time() - snapshot.fetched_at >= STALE_SECONDS:
+            return "STALE"
+        return "CACHED" if self.served_from_cache else "LIVE"
 
     def _update_sub_header(self) -> None:
         page = self.current_page_id
@@ -232,6 +239,7 @@ class TeletextApp(App):
         self.current_page_id = "100"
         self.current_subpage = 0
         self.fetching = False
+        self.served_from_cache = False
         self.request_id += 1
         self.index_mapping = []
         lst = self.query_one("#main_list", ListView)
@@ -273,7 +281,8 @@ class TeletextApp(App):
         self.current_page_id = state.page_id
         self.current_subpage = state.subpage
         self.selected_entry = state.selected_entry
-        self.entries = self.feed_cache[state.page_id].entries if state.page_id in self.feed_cache else []
+        self.served_from_cache = state.page_id in self.feed_cache
+        self.entries = self.feed_cache[state.page_id].entries if self.served_from_cache else []
         self.view_mode = state.mode
         self.next_rotation = time.monotonic() + AUTO_ROTATE_SECONDS
         self.fetching = False
@@ -316,6 +325,7 @@ class TeletextApp(App):
         self.feed_cache[page_id] = FeedSnapshot(entries, time.time(), source)
         self.entries = entries
         self.fetching = False
+        self.served_from_cache = False
         if self.view_mode == "article" and 0 <= self.selected_entry < len(entries):
             self._render_article()
         else:
