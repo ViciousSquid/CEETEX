@@ -20,7 +20,10 @@ dependencies = [
 ceetex = "ceetex:main"
 
 [tool.setuptools]
-py-modules = ["ceetex", "ceetex_core", "ceetex_feed", "ceetex_cache"]
+py-modules = [
+    "ceetex", "ceetex_core", "ceetex_feed", "ceetex_cache",
+    "ceetex_teletext", "ceetex_classic", "ceetex_newswire", "ceetex_reading",
+]
 
 [tool.setuptools.packages.find]
 include = ["ceetex_resources"]
