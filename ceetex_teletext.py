@@ -126,3 +126,79 @@ class TeletextGrid:
             )
             for row in self.cells
         ]
+
+
+# Broadcast-inspired Mode 7 set-after control codes (0x00–0x1f). The
+# terminal glyph mapping is deliberately approximate; styling and mosaic
+# composition follow actual Teletext control-byte semantics.
+_MODE7_COLOURS = ("black", "red", "green", "yellow",
+                  "blue", "magenta", "cyan", "white")
+
+
+def draw_mode7_row(grid: TeletextGrid, y: int, data: bytes, *, double_bottom: bool = False) -> None:
+    """Decode a single Mode 7-style control-code row into coloured cells.
+
+    Alpha/graphics colours, flash/steady, conceal, graphics separation,
+    background changes and held mosaic graphics are recognised. Control codes
+    occupy a character cell, as they do in broadcast Teletext. Double-height
+    data uses two terminal rows to retain the intended vertical footprint.
+    """
+    fg = "white"
+    bg = "black"
+    graphics = False
+    flashing = False
+    concealed = False
+    separated = False
+    hold = False
+    double = False
+    last_mosaic = " "
+    for x, code in enumerate(data[:COLUMNS]):
+        if code < 32:
+            # An attribute code uses one screen cell. In held graphics mode,
+            # display the last mosaic instead of leaving the cell blank.
+            char = last_mosaic if graphics and hold else " "
+            grid.put(x, y, char, fg=fg, bg=bg, flash=flashing, conceal=concealed)
+            if code <= 7:
+                fg = _MODE7_COLOURS[code]
+                graphics = False
+                concealed = False
+            elif code in range(0x10, 0x18):
+                fg = _MODE7_COLOURS[code - 0x10]
+                graphics = True
+                concealed = False
+            elif code == 0x08:
+                flashing = True
+            elif code == 0x09:
+                flashing = False
+            elif code == 0x0C:
+                double = False
+            elif code == 0x0D:
+                double = True
+            elif code == 0x18:
+                concealed = True
+            elif code == 0x19:
+                separated = False
+            elif code == 0x1A:
+                separated = True
+            elif code == 0x1C:
+                bg = "black"
+            elif code == 0x1D:
+                bg = fg
+            elif code == 0x1E:
+                hold = True
+            elif code == 0x1F:
+                hold = False
+                last_mosaic = " "
+            continue
+        if graphics and (0x20 <= code <= 0x3F or 0x60 <= code <= 0x7F):
+            pattern = (code & 0x1F) | ((code & 0x40) >> 1)
+            char = mosaic(pattern, separated=separated)
+            if pattern:
+                last_mosaic = char
+        else:
+            char = teletext_glyph(chr(code))
+        grid.put(x, y, char, fg=fg, bg=bg, flash=flashing, conceal=concealed)
+        if double and y + 1 < ROWS and not double_bottom:
+            # A terminal has no character-cell half-height font. Reserve the
+            # lower row explicitly; keep the glyph readable on both rows.
+            grid.put(x, y + 1, char, fg=fg, bg=bg, flash=flashing, conceal=concealed)
