@@ -20,7 +20,12 @@ number at any time to tune to a feed, or use the controls below.
 | **N** | Next numbered subpage | Headline list |
 | **P** | Previous numbered subpage | Headline list |
 | **A** | Toggle automatic subpage rotation | Anywhere; rotation acts on headline lists |
-| **M** | Toggle the classic 40-column × 25-row view | Anywhere |
+| **M** | Toggle the interactive classic 40-column × 25-row view | Anywhere |
+| **G** | P900: aggregated newswire (up to 24 source channels) | Anywhere |
+| **K** | P901: bookmarked stories | Anywhere |
+| **B** | Save / remove the open story from bookmarks | Article only |
+| **V** | Reveal / conceal hidden source information | Classic view |
+| **H** | Hold / resume automatic subpage rotation | Anywhere |
 | **Ctrl+Left** | Go back in navigation history | Anywhere |
 | **Ctrl+Right** | Go forward in navigation history | Anywhere |
 | **O** | Open the current article's full URL in the system browser | Article only |
@@ -34,13 +39,14 @@ operating-system function keys: your terminal may require `Fn` for function keys
 
 ## Pages, subpages and history
 
-- **P100** is the directory. Dial `100` or press **Home** to see every channel.
+- **P100** is the directory. Dial `100` or press **Home** to see every channel. The classic directory uses two clickable columns, with **N/P** to page beyond 32 channels.
+- **P900** is the newswire: combined, dated and deduplicated headlines from up to 24 configured RSS sources. Press **G** to open it.
+- **P901** contains your saved articles. Press **K** to open it, and **B** on an article to toggle its bookmark.
 - **P101/1**, **P101/2**, and so on are subpages within a feed. **N** and **P**
   wrap at the last and first subpages. The subpage count depends on the number
   of articles in the feed.
-- The default responsive view has **15 headlines per subpage**. Classic mode
-  uses **9 headlines per subpage**, a 40-column × 25-row viewport (when the terminal permits) and two-line Unicode
-  mosaic headings. It approximates Teletext; it is not a broadcast decoder.
+- The default responsive view has **15 headlines per subpage**. Classic mode uses **9 headlines**, a 40×25 cell screen (when the terminal permits), blue header, FastText footer, coloured cells and two-line block headings. It is a terminal approximation of broadcast Teletext, not a decoder.
+- Classic headlines mark unread articles with a flashing dot; articles already visited lose their unread marker. A diamond denotes a bookmark. Both are stored locally. **V** reveals concealed source information in classic article view. **H** pauses automatic subpage changes.
 - **Escape** returns from an article to the headline list, keeping its selected
   headline. History also records page and subpage changes, so you can navigate
   with **Ctrl+Left / Ctrl+Right**.
@@ -138,3 +144,17 @@ To locate the cache directory:
 ```sh
 python -c "from platformdirs import user_cache_dir; print(user_cache_dir('ceetex', appauthor=False))"
 ```
+
+## Personal reading state
+
+Bookmarks and the most recently opened headline IDs are stored in `reading.json` inside the OS-specific CEETEX user data directory. This is separate from the downloaded feed cache. Bookmarks persist between launches and store the story title, summary, source channel and article URL, so they remain available offline.
+
+~~~sh
+python -c "from platformdirs import user_data_dir; print(user_data_dir('ceetex', appauthor=False))"
+~~~
+
+The reading-state limits are 250 bookmarked stories and the most recent 5,000 read IDs. No account or cloud synchronisation is required.
+
+## Newswire and offline behaviour
+
+P900 displays available cached headlines immediately and tries to refresh up to 24 configured feed sources with a maximum of three concurrent fetches. Stories are sorted by publish time where available, deduplicated by URL and tagged with their source page. It cannot show uncached stories when offline. P901 is built from locally saved articles and needs no network.
