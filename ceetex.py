@@ -75,6 +75,16 @@ class FeedSnapshot:
     last_modified: str | None = None
 
 
+class DialingInput(Input):
+    """Route typed digits through a stable three-key buffer."""
+
+    def on_key(self, event) -> None:
+        if event.character and len(event.character) == 1 and event.character in "0123456789":
+            self.app.action_dial_digit(event.character)
+            event.prevent_default()
+            event.stop()
+
+
 class DialingListView(ListView):
     """Keep direct page-number entry working while list navigation has focus."""
 
@@ -152,6 +162,7 @@ class TeletextApp(App):
         self.history: list[PageState] = [PageState("100", "index")]
         self.history_position = 0
         self._refresh_article_key: str | None = None
+        self._dial_digits = ""
 
     def load_config(self) -> dict:
         data = read_json_config("pages.json", {"100": ["INDEX", ""]}, self.config_warnings)
@@ -208,7 +219,7 @@ class TeletextApp(App):
             with Horizontal(id="fasttext_bar"):
                 for colour, label in FASTTEXT_LABELS.items():
                     yield Button(label, id=f"fasttext_{colour}")
-            yield Input(placeholder="P100", id="dialer")
+            yield DialingInput(placeholder="P100", id="dialer")
 
     def on_mount(self) -> None:
         self._apply_width()
@@ -678,12 +689,17 @@ class TeletextApp(App):
             webbrowser.open(url)
 
     def action_dial_digit(self, digit: str) -> None:
-        """Capture numeric page input before list widgets consume the key."""
+        """Process page digits independently of Textual input focus timing."""
         if len(digit) != 1 or digit not in "0123456789":
             return
+        self._dial_digits = (self._dial_digits + digit)[-3:]
         dialer = self.query_one("#dialer", Input)
-        dialer.focus()
-        dialer.value += digit
+        dialer.value = self._dial_digits
+        if len(self._dial_digits) == 3:
+            self.load_page(self._dial_digits)
+            self.call_after_refresh(lambda: self._clear_dialer(focus=False))
+        else:
+            dialer.focus()
 
     def on_key(self, event) -> None:
         if (
@@ -699,13 +715,17 @@ class TeletextApp(App):
         if event.input.id != "dialer":
             return
         value = event.value
+        if value == self._dial_digits:
+            return  # Synthetic Input.Changed from the controlled key buffer.
         if len(value) == 3 and value.isascii() and value.isdigit():
+            self._dial_digits = value
             self.load_page(value)
             self.call_after_refresh(lambda: self._clear_dialer(focus=False))
         elif len(value) >= 3:
             self._clear_dialer()
 
     def _clear_dialer(self, *, focus: bool = True) -> None:
+        self._dial_digits = ""
         dialer = self.query_one("#dialer", Input)
         dialer.value = ""
         if focus:
