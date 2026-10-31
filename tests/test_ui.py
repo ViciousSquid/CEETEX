@@ -431,3 +431,19 @@ def test_invalid_settings_generate_warnings(tmp_path, monkeypatch):
     assert len([w for w in app.config_warnings if "settings.json" in w]) == 3
     assert not app.classic_mode and not app.auto_rotate
     assert app.rotation_seconds == 10
+
+
+@pytest.mark.asyncio
+async def test_classic_viewport_is_40_by_25_cells_when_terminal_allows():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 35)) as pilot:
+            await pilot.press("m")
+            await pilot.pause()
+            frame = app.query_one("#teletext_screen")
+            assert frame.size.width == 40
+            assert frame.size.height == 25
+            await pilot.press("m")
+            await pilot.pause()
+            assert frame.size.width == 100
+            assert frame.size.height == 35
