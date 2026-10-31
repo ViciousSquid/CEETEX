@@ -55,6 +55,18 @@ def read_json_config(filename: str, fallback: dict, warnings: list[str] | None =
         except (OSError, ValueError, TypeError) as exc:
             if warnings is not None:
                 warnings.append(f"{path}: {exc}")
+    # Installed wheels keep their bundled defaults inside a small resource
+    # package rather than relying on the user's current working directory.
+    if filename == "pages.json":
+        try:
+            from importlib.resources import files
+            bundled = json.loads(
+                files("ceetex_resources").joinpath("pages.json").read_text(encoding="utf-8")
+            )
+            if isinstance(bundled, dict):
+                return bundled
+        except (OSError, ValueError, TypeError, ModuleNotFoundError):
+            pass
     return fallback.copy()
 
 
@@ -770,5 +782,10 @@ class TeletextApp(App):
             dialer.focus()
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for both python ceetex.py and the installed CLI."""
     TeletextApp().run()
+
+
+if __name__ == "__main__":
+    main()
