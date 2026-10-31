@@ -47,7 +47,7 @@ def test_sixel_patterns_and_colour_validation():
 def test_unicode_text_cannot_break_cell_geometry():
     g = TeletextGrid()
     g.write(0, 0, "A中😀B\t")
-    assert g.plain()[0].startswith("A??B?")
+    assert g.plain()[0].startswith("A??B ")
     assert len(g.plain()[0]) == 40
 
 
