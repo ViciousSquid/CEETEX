@@ -92,7 +92,8 @@ def test_mode7_control_bytes_colour_graphics_hold_and_reveal():
     assert grid.cells[0][1].fg == "red"
     assert grid.cells[0][3].fg == "green"
     assert grid.cells[0][3].char == "█"
-    assert grid.cells[0][4].char == "█"   # held mosaic replaces control cell
+    assert grid.cells[0][4].char == " "   # HOLD applies after its control cell
+    assert grid.cells[0][5].char == "█"   # next control cell displays the held mosaic
     assert grid.cells[0][7].conceal
     assert grid.plain()[0][7] == " "
     assert grid.plain(reveal=True)[0][7] == "B"
