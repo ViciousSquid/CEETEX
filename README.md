@@ -10,18 +10,61 @@ A bridge between today's news feeds and the low-resolution **Mode 7 Teletext aes
 
 Requires Python 3.11 or newer.
 
+### macOS / Linux (recommended)
+
+From the CEETEX checkout or extracted ZIP directory, create an isolated Python
+environment and install the requirements **before** starting the application:
 
 ~~~sh
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -r requirements.txt
 python ceetex.py
 ~~~
 
-Or install from the checkout and launch the `ceetex` command from any directory:
+Next time you open Terminal in this directory:
+
+~~~sh
+source .venv/bin/activate
+python ceetex.py
+~~~
+
+Alternatively, install CEETEX itself inside that virtual environment to use the
+`ceetex` command from any working directory while the environment is activated:
 
 ~~~sh
 python -m pip install .
 ceetex
 ~~~
+
+Do not use `sudo pip` or `--break-system-packages`: macOS and Homebrew
+Python installations may be externally managed. A virtual environment also
+ensures that `python` and `pip` refer to the same installation.
+
+### Windows (PowerShell)
+
+~~~powershell
+py -3 -m venv .venv
+.venv\\Scripts\\Activate.ps1
+python -m pip install -r requirements.txt
+python ceetex.py
+~~~
+
+If `Activate.ps1` is blocked by PowerShell's execution policy, run the
+virtual-environment interpreter directly without activating:
+
+~~~powershell
+.venv\\Scripts\\python.exe -m pip install -r requirements.txt
+.venv\\Scripts\\python.exe ceetex.py
+~~~
+
+### Troubleshooting
+
+`ModuleNotFoundError: No module named 'platformdirs'` (or `textual`,
+`feedparser` or `rich`) means the dependencies are not installed for the
+interpreter launching CEETEX. Activate `.venv`, then rerun
+`python -m pip install -r requirements.txt`. You can verify the interpreter
+with `python -c "import sys; print(sys.executable)"`.
 
 When running from source, bundled defaults are loaded relative to `ceetex.py`.
 Installed distributions carry the default channel directory as a package resource. To override them without editing
