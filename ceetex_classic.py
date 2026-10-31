@@ -105,6 +105,8 @@ def compose_classic(
             "UP/DOWN SELECT, ENTER READ",
             "B SAVE STORY  O OPEN WEB",
             "V REVEAL TEXT  H HOLD PAGE",
+            "HTTPS ERROR? UPDATE CERTIFICATES",
+            "SEE README: SSL TROUBLESHOOTING",
         ), start=7):
             grid.write(1, y, text, fg="cyan" if y % 2 else "white")
         # A genuine Mode 7 control-code row demonstrates changing per-cell
