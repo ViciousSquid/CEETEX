@@ -418,6 +418,7 @@ class TeletextApp(App):
             fasttext_pages=self.fasttext_pages, reading=self.reading,
             reveal=self.reveal, index_subpage=self._classic_index_page,
             message=self._error_text or ("TUNING..." if self.fetching else "NO SIGNAL"),
+            signal=self._signal(), hold=self.hold_page,
         )
         self._classic_hits = page.hit_regions
         self.query_one("#classic_page", ClassicTeletextScreen).update(
@@ -528,6 +529,7 @@ class TeletextApp(App):
             self.show_error(state.page_id, "PAGE DOES NOT EXIST", self.request_id)
             return
         self._refresh_article_key = None
+        self._error_text = ""
         self.current_page_id = state.page_id
         self.current_subpage = state.subpage
         self.selected_entry = state.selected_entry
@@ -740,6 +742,7 @@ class TeletextApp(App):
                 self.selected_entry = index
         self._refresh_article_key = None
         self.entries = entries
+        self._error_text = ""
         self.fetching = False
         self.served_from_cache = False
         if self.view_mode == "article" and 0 <= self.selected_entry < len(entries):
