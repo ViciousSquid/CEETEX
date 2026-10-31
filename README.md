@@ -2,7 +2,7 @@
 
 #### Ceefax/Teletext engine for modern web feeds
 
-A bridge between today's high-speed data and the low-resolution **Mode 7 Teletext aesthetic**. Customise your RSS channels, dial three-digit pages, and browse the news in a lightweight terminal interface.
+A bridge between today's news feeds and the low-resolution **Mode 7 Teletext aesthetic**. Dial three-digit pages, read stories, explore an all-channel newswire, and save articles for later in a keyboard-first terminal interface.
 
 ![CEETEX screenshot](https://github.com/user-attachments/assets/87f7e7d5-a9a5-43c9-8ad8-e678f49c1465)
 
@@ -42,12 +42,19 @@ See [the full controls reference](docs/CONTROLS.md) for all key bindings, status
 - **F1 / F2 / F3 / F4** — red NEWS, green SPORT, yellow WEATHER, cyan TRAVEL FastText links. The four colour buttons are also clickable.
 - **N / P** — next or previous numbered subpage. For example, P101/1 and P101/2.
 - **A** — toggle subpage auto-rotation (every 10 seconds by default; configurable).
-- **M** — toggle an optional centred, **40-column × 25-row** classic Teletext viewport, with two-row block-character headings. The default is responsive.
+- **M** — switch between responsive mode and a full **40-column × 25-row** interactive Teletext screen.
+- **G / P900** — browse the **Newswire**, which aggregates up to 24 RSS channels and sorts headlines newest first.
+- **K / P901** — open your **Bookmarks** page.
+- **B** — save or remove the article you're reading.
+- **V** — reveal concealed source information in classic article pages.
+- **H** — HOLD/release automatic Teletext subpage rotation.
 - **Ctrl+Left / Ctrl+Right** — step backwards or forwards through page, subpage, and article history.
 - **R** — refresh the current feed.
 - **Q** — quit.
 
 The clock updates every second. The signal indicator shows **TUNING**, **LIVE**, **CACHED** (revisited without refetching), **STALE** (older than 15 minutes), **OFFLINE/CACHED** (a refresh failed but earlier data is available), or **NO SIGNAL**.
+
+Unread stories have a prominent dot (which flashes in classic mode); already-read stories have a muted marker, and bookmarked stories show a diamond. Opening an article marks it read. The read/unread and bookmark state is saved locally on your computer.
 
 Subpages show nine headlines in 40-column mode or fifteen in responsive mode. Moving between already loaded pages and returning from an article uses the in-memory feed cache rather than downloading again. Snapshots are also persisted in the OS-specific per-user cache directory, so recently viewed pages can be read after restarting the app—even without a network connection. Press R to revalidate the current feed; conditional HTTP requests reuse unchanged content.
 
@@ -84,7 +91,7 @@ Copy `settings.example.json` to `settings.json` and set your startup preferences
 
 Rotation intervals between 2 and 300 seconds are supported. Set `auto_refresh_seconds` to 0 to disable background refresh (the default), or to 60–3600 seconds to periodically revalidate the currently open feed without blanking cached content. The **M** and **A** keys toggle their respective features for the running session; they do not rewrite this file.
 
-Classic mode uses a 40-column by 25-row viewport when the terminal is large enough and Unicode block mosaics to approximate double-height Teletext headings. Terminals cannot actually switch their physical character-cell heights, so this is a visual approximation rather than a broadcast Mode 7 renderer.
+Classic mode uses a **40×25 per-character colour grid**, a familiar blue page header, a red/green/yellow/cyan FastText footer, flashing indicators, concealed text reveal, double-row block headings and a two-column index. Mouse clicks and arrow keys work on the classic screen itself. It remains a terminal interpretation: the original broadcast Mode 7 pixels and physical double-height character cells cannot be reproduced exactly in arbitrary terminal fonts.
 
 ## Tests
 
@@ -109,3 +116,21 @@ python -c "from platformdirs import user_cache_dir; print(user_cache_dir('ceetex
 ```
 
 You can remove this cache directory while CEETEX is not running to discard downloaded headlines. Cached data is bounded to 300 entries per page, and caches are never treated as executable code. Channel URL changes invalidate old cached snapshots.
+
+## Your newswire: page 900
+
+Dial **900** or press **G** to see the latest headlines combined from the channels in `pages.json`. Duplicate article URLs are removed, dated items are sorted newest first, and each headline carries its original channel number (for example P101). CEETEX uses cached headlines immediately when available, then refreshes up to 24 source feeds in parallel (maximum three active HTTP fetches). Offline newswire contents therefore depend on which feeds you've previously downloaded. The wire is a reading index, not a replacement for the individual source pages.
+
+## Saved stories: page 901
+
+Press **B** while reading an article to save or remove it. **K** or **901** opens bookmarks from any page. Your saved articles and read/unread identities persist in your OS-specific user data directory, separately from the downloaded RSS cache; no account or external bookmarking service is used.
+
+~~~sh
+python -c "from platformdirs import user_data_dir; print(user_data_dir('ceetex', appauthor=False))"
+~~~
+
+The `reading.json` file can be backed up or removed while CEETEX is closed. It is limited to 250 saved stories and the 5,000 most recently read IDs. News source attribution is retained when a bookmarked story appears on page 901.
+
+## Classic Teletext keys
+
+The classic screen is navigable with **Up/Down/Enter**, click-to-select headlines and index entries, and the four clickable coloured FastText segments along the bottom. **N/P** steps between numbered headline subpages (or index directory subpages if you configure more than 32 channels). **H** holds automatic subpage rotation, and **V** reveals the concealed source field on article pages. While a feed is being fetched, the interface stays responsive; already cached articles remain accessible.
