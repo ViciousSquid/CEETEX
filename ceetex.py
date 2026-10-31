@@ -329,7 +329,17 @@ class TeletextApp(App):
         if page_id == "100":
             self._navigate(PageState("100", "index"))
         elif page_id not in self.pages:
-            self.show_error(page_id, "PAGE DOES NOT EXIST")
+            # Invalid dialling must invalidate the previous channel's worker.
+            # Otherwise a pending feed can repaint this error screen.
+            self.request_id += 1
+            self.current_page_id = page_id
+            self.current_subpage = 0
+            self.selected_entry = -1
+            self.entries = []
+            self.view_mode = "error"
+            self.fetching = False
+            self.served_from_cache = False
+            self.show_error(page_id, "PAGE DOES NOT EXIST", self.request_id)
         else:
             self._navigate(PageState(page_id))
 
@@ -346,8 +356,12 @@ class TeletextApp(App):
         except Exception as exc:
             self.call_from_thread(self.show_error, page_id, f"CONNECTION ERROR: {exc}", request_id)
 
+    def _request_matches(self, page_id: str, request_id: int) -> bool:
+        """Only the currently displayed page's newest request may update UI."""
+        return page_id == self.current_page_id and request_id == self.request_id
+
     def render_feed(self, page_id: str, entries: list, source: str, request_id: int) -> None:
-        if page_id != self.current_page_id or request_id != self.request_id:
+        if not self._request_matches(page_id, request_id):
             return
         self.feed_cache[page_id] = FeedSnapshot(entries, time.time(), source)
         self.entries = entries
@@ -403,7 +417,7 @@ class TeletextApp(App):
         self._toggle_views(article=True)
 
     def show_error(self, page_id: str, message: str, request_id: int | None = None) -> None:
-        if request_id is not None and (request_id != self.request_id or page_id != self.current_page_id):
+        if request_id is not None and not self._request_matches(page_id, request_id):
             return
         self.fetching = False
         cached = self.feed_cache.get(page_id)

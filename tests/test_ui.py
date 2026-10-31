@@ -119,3 +119,43 @@ async def test_every_directory_entry_is_selectable_including_last_column():
             assert app.query_one("#directory_header").display
             await pilot.press("f1")
             assert not app.query_one("#directory_header").display
+
+
+@pytest.mark.asyncio
+async def test_superseded_requests_cannot_replace_newer_feed_or_error():
+    """Callbacks may arrive out of order, including for the same RSS channel."""
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            items = fixture_entries(3)
+            app.load_page("101")
+            first = app.request_id
+            app.load_page("500")
+            latest = app.request_id
+            app.render_feed("101", items, "OLD", first)
+            app.show_error("101", "OLD FAILURE", first)
+            assert app.current_page_id == "500"
+            assert app.view_mode == "list" or app.fetching
+            app.render_feed("500", items, "CURRENT", latest)
+            assert app.feed_cache["500"].source == "CURRENT"
+            assert app.view_mode == "list"
+
+            app.action_refresh()
+            refresh = app.request_id
+            app.render_feed("500", fixture_entries(1), "OUTDATED", latest)
+            app.show_error("500", "OLD FAILURE", latest)
+            assert app.fetching
+            assert app.feed_cache["500"].source == "CURRENT"
+            app.render_feed("500", fixture_entries(2), "FRESH", refresh)
+            assert app.feed_cache["500"].source == "FRESH"
+
+            app.load_page("101")
+            pending = app.request_id
+            app.load_page("999")
+            assert app.current_page_id == "999" and app.view_mode == "error"
+            app.render_feed("101", items, "LATE", pending)
+            app.show_error("101", "LATE FAILURE", pending)
+            assert app.current_page_id == "999" and app.view_mode == "error"
+            assert "101" not in app.feed_cache
+            await pilot.press("escape")
+            assert app.current_page_id == "100"
