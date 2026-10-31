@@ -32,6 +32,7 @@ def compose_classic(
     selected_index: int, fasttext_pages: dict[str, str],
     reading, reveal: bool = False, now: datetime | None = None,
     index_subpage: int = 0, message: str = "",
+    signal: str = "LIVE", hold: bool = False,
 ) -> ClassicPage:
     grid = TeletextGrid()
     hits: dict[int, list[tuple[int, int, int]]] = {}
@@ -40,8 +41,10 @@ def compose_classic(
     grid.write(0, 0, f"P{page_id}", fg="yellow", bg="blue")
     grid.write(5, 0, "CEETEX", fg="white", bg="blue")
     grid.write(18, 0, now.strftime("%d %b %H:%M").upper(), fg="white", bg="blue")
-    grid.write(34, 0, "LIVE", fg="green", bg="blue")
+    grid.write(32, 0, signal[:8].ljust(8), fg="green" if signal in ("LIVE", "CACHED") else "yellow", bg="blue")
     grid.write(0, 1, "CEEFAX FOR THE INTERNET", fg="cyan")
+    if hold:
+        grid.write(35, 1, "HOLD", fg="yellow", flash=True)
     grid.heading(2, page_title[:10], fg="yellow")
     grid.write(0, 4, "━" * 40, fg="blue")
 
@@ -61,7 +64,11 @@ def compose_classic(
         grid.write(0, 22, f"INDEX {index_subpage + 1}/{max(1, (len(index_mapping)+31)//32)}", fg="yellow")
     elif mode == "list":
         if not entries:
-            grid.write(1, 8, "NO HEADLINES AVAILABLE", fg="red")
+            grid.write(1, 8, "SEARCHING PAGE " + page_id if signal == "TUNING" else (
+                "NO SAVED STORIES" if page_id == "901" else "NO HEADLINES AVAILABLE"),
+                fg="yellow" if signal == "TUNING" else "red")
+            if signal == "TUNING":
+                grid.write(1, 10, "WAITING FOR SIGNAL", fg="cyan", flash=True)
         for slot, global_index in enumerate(displayed_indices[:9]):
             if global_index >= len(entries):
                 break
