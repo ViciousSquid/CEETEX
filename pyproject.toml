@@ -14,6 +14,7 @@ dependencies = [
     "feedparser",
     "rich",
     "platformdirs>=4,<6",
+    "certifi>=2025.1.31",
 ]
 
 [project.scripts]
