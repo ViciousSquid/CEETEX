@@ -94,6 +94,8 @@ class TeletextApp(App):
         super().__init__()
         self.pages = self.load_config()
         self.fasttext_pages = self.load_fasttext()
+        self.settings = self.load_settings()
+        self.rotation_seconds = self.settings["rotation_seconds"]
         self.feed_cache: dict[str, FeedSnapshot] = {}
         self.entries: list = []
         self.displayed_indices: list[int] = []
@@ -102,9 +104,9 @@ class TeletextApp(App):
         self.view_mode = "index"
         self.current_subpage = 0
         self.selected_entry = -1
-        self.classic_mode = False
-        self.auto_rotate = False
-        self.next_rotation = time.monotonic() + AUTO_ROTATE_SECONDS
+        self.classic_mode = self.settings["classic_mode"]
+        self.auto_rotate = self.settings["auto_subpages"]
+        self.next_rotation = time.monotonic() + self.rotation_seconds
         self.request_id = 0
         self.fetching = False
         self.served_from_cache = False
@@ -129,6 +131,24 @@ class TeletextApp(App):
         except (OSError, ValueError):
             overrides = {}
         return validate_fasttext(overrides, self.pages, FASTTEXT_DEFAULTS)
+
+    @staticmethod
+    def load_settings() -> dict:
+        """Optional runtime defaults; toggles don't rewrite the user's config."""
+        try:
+            data = json.loads((ROOT / "settings.json").read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        seconds = data.get("rotation_seconds", AUTO_ROTATE_SECONDS)
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 2 <= seconds <= 300:
+            seconds = AUTO_ROTATE_SECONDS
+        return {
+            "rotation_seconds": seconds,
+            "auto_subpages": data.get("auto_subpages") is True,
+            "classic_mode": data.get("classic_mode") is True,
+        }
 
     def compose(self) -> ComposeResult:
         with Container(id="teletext_screen"):
@@ -178,7 +198,7 @@ class TeletextApp(App):
         self.update_header()
         self._update_sub_header()
         if self.auto_rotate and self.view_mode == "list" and time.monotonic() >= self.next_rotation:
-            self.next_rotation = time.monotonic() + AUTO_ROTATE_SECONDS
+            self.next_rotation = time.monotonic() + self.rotation_seconds
             self._change_subpage(1, record_history=False)
 
     def update_header(self) -> None:
@@ -284,7 +304,7 @@ class TeletextApp(App):
         self.served_from_cache = state.page_id in self.feed_cache
         self.entries = self.feed_cache[state.page_id].entries if self.served_from_cache else []
         self.view_mode = state.mode
-        self.next_rotation = time.monotonic() + AUTO_ROTATE_SECONDS
+        self.next_rotation = time.monotonic() + self.rotation_seconds
         self.fetching = False
         self.request_id += 1  # invalidate callbacks from older pages/requests
         if not self.entries:
@@ -436,7 +456,7 @@ class TeletextApp(App):
 
     def action_toggle_auto_rotate(self) -> None:
         self.auto_rotate = not self.auto_rotate
-        self.next_rotation = time.monotonic() + AUTO_ROTATE_SECONDS
+        self.next_rotation = time.monotonic() + self.rotation_seconds
         self.notify("AUTO SUBPAGES ON" if self.auto_rotate else "AUTO SUBPAGES OFF")
 
     def action_toggle_classic(self) -> None:
