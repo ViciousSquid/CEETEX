@@ -82,3 +82,17 @@ async def test_clock_status_and_stale_error_ignored():
             app.show_error("500", "OFFLINE", app.request_id)
             assert app._signal() == "OFFLINE/CACHED"
             assert app.view_mode == "list"
+
+
+def test_optional_settings_defaults_and_validation(tmp_path):
+    (tmp_path / "settings.json").write_text('{"classic_mode": true, "auto_subpages": true, "rotation_seconds": 4}')
+    with patch("ceetex.ROOT", tmp_path):
+        app = TeletextApp()
+        assert app.classic_mode is True
+        assert app.auto_rotate is True
+        assert app.rotation_seconds == 4
+    (tmp_path / "settings.json").write_text('{"rotation_seconds": -9, "classic_mode": "yes"}')
+    with patch("ceetex.ROOT", tmp_path):
+        app = TeletextApp()
+        assert app.classic_mode is False
+        assert app.rotation_seconds == 10
