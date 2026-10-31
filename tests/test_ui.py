@@ -290,7 +290,7 @@ def test_invalid_config_entries_cannot_break_index(tmp_path, monkeypatch):
     monkeypatch.setattr("ceetex.ROOT", bundle)
     monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
     app = TeletextApp()
-    assert sorted(app.pages) == ["100", "101", "900", "901"]
+    assert sorted(app.pages) == ["100", "101", "900", "901", "902"]
     assert len(app.config_warnings) == 4
 
 
@@ -427,7 +427,7 @@ def test_invalid_feed_url_ignored_with_warning(tmp_path, monkeypatch):
     monkeypatch.setattr("ceetex.ROOT", tmp_path)
     monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
     app = TeletextApp()
-    assert sorted(app.pages) == ["100", "101", "900", "901"]
+    assert sorted(app.pages) == ["100", "101", "900", "901", "902"]
     assert any("invalid feed URL" in msg for msg in app.config_warnings)
     assert all(page in app.pages for page in app.fasttext_pages.values())
 
