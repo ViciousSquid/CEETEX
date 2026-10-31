@@ -23,7 +23,7 @@ FIELDS = ("id", "guid", "link", "title", "summary", "description", "published", 
 def story_key(page_id: str, entry: dict) -> str:
     from ceetex_core import article_identity
     original = str(entry.get("source_page") or page_id)
-    return f"{original}|{article_identity(entry)}"
+    return f"{original}|{article_identity(entry)}"[:512]
 
 
 def _safe_entry(entry: dict) -> dict[str, str]:
