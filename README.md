@@ -45,6 +45,7 @@ See [the full controls reference](docs/CONTROLS.md) for all key bindings, status
 - **M** — switch between responsive mode and a full **40-column × 25-row** interactive Teletext screen.
 - **G / P900** — browse the **Newswire**, which aggregates up to 24 RSS channels and sorts headlines newest first.
 - **K / P901** — open your **Bookmarks** page.
+- **P902** — built-in Teletext help page and interactive colour/mosaic/reveal demonstration (also works offline).
 - **B** — save or remove the article you're reading.
 - **V** — reveal concealed source information in classic article pages.
 - **H** — HOLD/release automatic Teletext subpage rotation.
