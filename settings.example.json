@@ -1,5 +1,6 @@
 {
   "classic_mode": false,
   "auto_subpages": false,
-  "rotation_seconds": 10
+  "rotation_seconds": 10,
+  "auto_refresh_seconds": 0
 }
