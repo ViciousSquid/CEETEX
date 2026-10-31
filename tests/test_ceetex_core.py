@@ -38,3 +38,12 @@ class TeletextCoreTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_mosaic_heading_is_two_rows_and_respects_column_limit():
+    from ceetex_core import mosaic_heading
+    for text in ("NEWS HEADLINES", "HACKER NEWS", "WEATHER", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", ""):
+        lines = mosaic_heading(text, 40).split("\n")
+        assert len(lines) == 2
+        assert all(len(line) <= 40 for line in lines)
+    assert "█" in mosaic_heading("A", 40)
