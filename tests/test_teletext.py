@@ -79,3 +79,30 @@ def test_classic_article_source_reveal_and_bookmark_flag():
     assert "Some useful text" in frame.grid.plain()[7]
     assert "SOURCE" not in frame.grid.plain()[6]
     assert "SOURCE: BBC" in frame.grid.plain(reveal=True)[6]
+
+
+def test_mode7_control_bytes_colour_graphics_hold_and_reveal():
+    from ceetex_teletext import draw_mode7_row
+    grid = TeletextGrid()
+    # Red text, green graphics, held mosaic, separated graphics, conceal.
+    draw_mode7_row(grid, 0, bytes([
+        0x01, ord("A"), 0x12, 0x7F, 0x1E, 0x1A, 0x18, ord("B"),
+    ]))
+    assert grid.cells[0][1].char == "A"
+    assert grid.cells[0][1].fg == "red"
+    assert grid.cells[0][3].fg == "green"
+    assert grid.cells[0][3].char == "█"
+    assert grid.cells[0][4].char == "█"   # held mosaic replaces control cell
+    assert grid.cells[0][7].conceal
+    assert grid.plain()[0][7] == " "
+    assert grid.plain(reveal=True)[0][7] == "B"
+
+
+def test_mode7_flash_background_and_double_height():
+    from ceetex_teletext import draw_mode7_row
+    grid = TeletextGrid()
+    draw_mode7_row(grid, 2, bytes([0x03, 0x1D, 0x08, ord("X"), 0x09, 0x0D, ord("Y")]))
+    assert grid.cells[2][3].bg == "yellow"
+    assert grid.cells[2][3].flash
+    assert not grid.cells[2][6].flash
+    assert grid.cells[3][6].char == "Y"  # explicit lower-row footprint
