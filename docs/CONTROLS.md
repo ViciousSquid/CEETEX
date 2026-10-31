@@ -42,6 +42,7 @@ operating-system function keys: your terminal may require `Fn` for function keys
 - **P100** is the directory. Dial `100` or press **Home** to see every channel. The classic directory uses two clickable columns, with **N/P** to page beyond 32 channels.
 - **P900** is the newswire: combined, dated and deduplicated headlines from up to 24 configured RSS sources. Press **G** to open it.
 - **P901** contains your saved articles. Press **K** to open it, and **B** on an article to toggle its bookmark.
+- **P902** is the offline help page, including a classic Mode 7 colour/mosaic demonstration and concealed text to reveal with **V**.
 - **P101/1**, **P101/2**, and so on are subpages within a feed. **N** and **P**
   wrap at the last and first subpages. The subpage count depends on the number
   of articles in the feed.
