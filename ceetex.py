@@ -23,7 +23,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text, article_identity
-from ceetex_feed import fetch_http_feed
+from ceetex_feed import fetch_http_feed, describe_feed_error
 from ceetex_cache import load_feed as load_cached_feed, save_feed as save_cached_feed
 from ceetex_classic import INDEX_PER_PAGE, compose_classic
 from ceetex_newswire import MAX_WIRE_SOURCES, merge_feeds
@@ -701,7 +701,7 @@ class TeletextApp(App):
                 result.etag, result.last_modified,
             )
         except Exception as exc:
-            self.call_from_thread(self.show_error, page_id, f"CONNECTION ERROR: {exc}", request_id)
+            self.call_from_thread(self.show_error, page_id, describe_feed_error(exc), request_id)
 
     def _request_matches(self, page_id: str, request_id: int) -> bool:
         """Only the currently displayed page's newest request may update UI."""
