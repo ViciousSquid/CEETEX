@@ -1,0 +1,40 @@
+import unittest
+from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext
+
+
+class TeletextCoreTests(unittest.TestCase):
+    def test_subpage_counts_and_boundaries(self):
+        self.assertEqual(page_count(0, 9), 1)
+        self.assertEqual(page_count(9, 9), 1)
+        self.assertEqual(page_count(10, 9), 2)
+        self.assertEqual(page_count(150, 15), 10)
+        with self.assertRaises(ValueError):
+            page_count(10, 0)
+
+    def test_subpage_contents_keep_global_indexes(self):
+        entries = list(range(25))
+        self.assertEqual(subpage_entries(entries, 0, 9), list(enumerate(range(9))))
+        self.assertEqual(subpage_entries(entries, 2, 9), [(18 + i, 18 + i) for i in range(7)])
+        with self.assertRaises(IndexError):
+            subpage_entries(entries, 3, 9)
+
+    def test_rotation_wraps_both_directions(self):
+        self.assertEqual(next_subpage(2, 3, 1), 0)
+        self.assertEqual(next_subpage(0, 3, -1), 2)
+        self.assertEqual(next_subpage(1, 3, 1), 2)
+
+    def test_navigation_states_keep_exact_article(self):
+        state = PageState("101", "article", 3, 48)
+        self.assertEqual(state.subpage, 3)
+        self.assertEqual(state.selected_entry, 48)
+        self.assertNotEqual(state, PageState("101", "list", 3, 48))
+
+    def test_fasttext_overrides_validate_existing_pages(self):
+        pages = {"100": [], "101": [], "102": [], "130": [], "190": [], "500": []}
+        defaults = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
+        result = validate_fasttext({"red": "500", "green": "999", "yellow": 102, "cyan": "١٩٠"}, pages, defaults)
+        self.assertEqual(result, {"red": "500", "green": "130", "yellow": "102", "cyan": "190"})
+
+
+if __name__ == '__main__':
+    unittest.main()
