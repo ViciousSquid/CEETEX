@@ -20,7 +20,7 @@ number at any time to tune to a feed, or use the controls below.
 | **N** | Next numbered subpage | Headline list |
 | **P** | Previous numbered subpage | Headline list |
 | **A** | Toggle automatic subpage rotation | Anywhere; rotation acts on headline lists |
-| **M** | Toggle the classic 40-column view | Anywhere |
+| **M** | Toggle the classic 40-column × 25-row view | Anywhere |
 | **Ctrl+Left** | Go back in navigation history | Anywhere |
 | **Ctrl+Right** | Go forward in navigation history | Anywhere |
 | **O** | Open the current article's full URL in the system browser | Article only |
@@ -39,12 +39,12 @@ operating-system function keys: your terminal may require `Fn` for function keys
   wrap at the last and first subpages. The subpage count depends on the number
   of articles in the feed.
 - The default responsive view has **15 headlines per subpage**. Classic mode
-  uses **9 headlines per subpage**, a 40-column width and two-line Unicode
+  uses **9 headlines per subpage**, a 40-column × 25-row viewport (when the terminal permits) and two-line Unicode
   mosaic headings. It approximates Teletext; it is not a broadcast decoder.
 - **Escape** returns from an article to the headline list, keeping its selected
   headline. History also records page and subpage changes, so you can navigate
   with **Ctrl+Left / Ctrl+Right**.
-- Headline lists are kept in memory for the current session. Returning to a
+- Headline lists are kept in memory and persisted to the OS-specific per-user cache directory. Returning to a
   previously visited page does not normally download its feed again. Press **R**
   to request fresh data.
 
@@ -57,7 +57,7 @@ The date and clock update every second. The signal field shows:
 | `INDEX` | Main page directory (P100) |
 | `TUNING` | An RSS request is in progress |
 | `LIVE` | Feed data has just been fetched |
-| `CACHED` | Revisited feed data was served from memory |
+| `CACHED` | Revisited feed data was served from memory, disk, or HTTP 304 revalidation |
 | `STALE` | The feed snapshot is at least 15 minutes old |
 | `OFFLINE/CACHED` | A refresh failed; CEETEX retained an earlier snapshot |
 | `NO SIGNAL` | No data is available for the current page |
@@ -96,11 +96,12 @@ Copy `settings.example.json` to `settings.json`. Example:
 {
   "classic_mode": false,
   "auto_subpages": false,
-  "rotation_seconds": 10
+  "rotation_seconds": 10,
+  "auto_refresh_seconds": 0
 }
 ```
 
-`rotation_seconds` accepts values from 2 to 300 seconds. Pressing **M** or
+`rotation_seconds` accepts values from 2 to 300 seconds. Set `auto_refresh_seconds` to 0 to disable automatic feed refreshing, or to 60–3600 to revalidate the currently open page on a timer. Cached headlines and articles remain visible while a refresh is in progress. Pressing **M** or
 **A** changes that setting for the running session only; it does not overwrite
 `settings.json`. Automatic rotation affects headline subpages, not articles
 or the directory.
@@ -125,3 +126,15 @@ Launching from another working directory does not change the lookup order.
 If function keys are intercepted by your terminal, click the corresponding
 FastText colour on-screen. If a feed shows `NO SIGNAL` or a connection error,
 check the URL in `pages.json` and press **R** to retry.
+
+## Offline cache and network limits
+
+CEETEX saves recently downloaded RSS headlines in a bounded per-user disk cache. Restarting CEETEX does not require a fresh download to display these stored headlines. Feed URLs must use HTTP or HTTPS, and cache entries are ignored if their saved feed URL differs from the current configured URL. Press **R** to request fresh data.
+
+Downloads use a 2 MiB response limit and a 10-second socket timeout. Conditional ETag and Last-Modified requests reuse an unchanged feed on HTTP 304; a failed refresh leaves existing cached content available. The timeout applies to individual network socket operations rather than the entire transfer.
+
+To locate the cache directory:
+
+```sh
+python -c "from platformdirs import user_cache_dir; print(user_cache_dir('ceetex', appauthor=False))"
+```
