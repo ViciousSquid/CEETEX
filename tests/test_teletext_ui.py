@@ -117,3 +117,21 @@ async def test_classic_fasttext_bar_and_reveal_hold_controls():
             assert app.hold_page
             await pilot.press("h")
             assert not app.hold_page
+
+
+@pytest.mark.asyncio
+async def test_builtin_help_page_902_is_offline_and_reveals_secret():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None), patch.object(TeletextApp, "fetch_wire", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.load_page("902")
+            assert app.view_mode == "help"
+            assert app.current_page_id == "902"
+            await pilot.press("m")
+            screen = app.query_one("#classic_page")
+            assert "P902" in screen.render().plain.splitlines()[0]
+            assert "YOUR NEWS IS YOURS TO KEEP" not in screen.render().plain
+            await pilot.press("v")
+            assert "YOUR NEWS IS YOURS TO KEEP" in screen.render().plain
+            await pilot.press("home")
+            assert app.current_page_id == "100"
