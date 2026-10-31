@@ -228,7 +228,7 @@ class TeletextApp(App):
             ):
                 self.config_warnings.append(f"pages.json: invalid channel {page_id!r}")
                 continue
-            if page_id not in ("100", "900", "901"):
+            if page_id not in ("100", "900", "901", "902"):
                 parsed = urlparse(channel[1])
                 if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc or any(ch.isspace() for ch in channel[1]):
                     self.config_warnings.append(f"pages.json: invalid feed URL for {page_id}")
@@ -237,6 +237,7 @@ class TeletextApp(App):
         pages["100"] = ["INDEX", ""]
         pages["900"] = ["NEWSWIRE", ""]
         pages["901"] = ["BOOKMARKS", ""]
+        pages["902"] = ["HELP", ""]
         return pages
 
     def load_fasttext(self) -> dict[str, str]:
@@ -361,6 +362,8 @@ class TeletextApp(App):
     def _signal(self) -> str:
         if self.current_page_id == "100":
             return "INDEX"
+        if self.current_page_id == "902":
+            return "INFO"
         if self.fetching:
             return "TUNING"
         snapshot = self.feed_cache.get(self.current_page_id)
@@ -547,6 +550,10 @@ class TeletextApp(App):
         self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
         self.fetching = False
         self.request_id += 1  # invalidate callbacks from older pages/requests
+        if state.page_id == "902":
+            self.view_mode = "help"
+            self._render_help()
+            return
         if state.page_id == "901":
             self.render_feed("901", self.reading.bookmarked_entries(), "SAVED STORIES", self.request_id)
             if state.mode == "article" and 0 <= state.selected_entry < len(self.entries):
@@ -573,6 +580,22 @@ class TeletextApp(App):
     def load_page(self, page_id: str) -> None:
         # Invalid pages must be navigable history states as well.
         self._navigate(PageState(page_id, "index" if page_id == "100" else "list"))
+
+    def _render_help(self) -> None:
+        self.view_mode = "help"
+        self.entries = []
+        self.fetching = False
+        self.query_one("#article_view", Static).update(
+            "[b yellow]CEETEX HELP • PAGE 902[/b yellow]\n\n"
+            "P100 DIRECTORY  •  P900 NEWSWIRE  •  P901 BOOKMARKS\n"
+            "0–9 DIAL PAGE  •  F1–F4 FASTTEXT\n"
+            "UP/DOWN SELECT  •  ENTER OPEN ARTICLE\n"
+            "N/P SUBPAGE  •  A AUTO ROTATION  •  H HOLD\n"
+            "B BOOKMARK  •  O OPEN WEB  •  V REVEAL\n"
+            "M CLASSIC DISPLAY  •  ESC RETURN\n\n"
+            "Toggle classic mode (M) for the interactive 40×25 page."
+        )
+        self._toggle_views(article=True)
 
     def _show_newswire(self) -> None:
         """Show existing cached headlines immediately, then update online."""
@@ -938,7 +961,7 @@ class TeletextApp(App):
             if self.selected_entry >= 0:
                 self.current_subpage = self.selected_entry // self.page_size
             self._render_article()
-        elif self.view_mode == "error":
+        elif self.view_mode in ("error", "help"):
             self._toggle_views(article=True)
         self.notify("40-COLUMN MODE" if self.classic_mode else "RESPONSIVE MODE")
 
@@ -971,7 +994,7 @@ class TeletextApp(App):
         self._clear_dialer(focus=False)
 
     def action_refresh(self) -> None:
-        if self.current_page_id == "100" or self.current_page_id not in self.pages:
+        if self.current_page_id in ("100", "902") or self.current_page_id not in self.pages:
             return
         if self.current_page_id == "901":
             self.request_id += 1
