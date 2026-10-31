@@ -1,3 +1,4 @@
 textual 
 feedparser
 rich
+platformdirs>=4,<6

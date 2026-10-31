@@ -16,7 +16,13 @@ python -m pip install -r requirements.txt
 python ceetex.py
 ~~~
 
-The application loads `pages.json` relative to `ceetex.py`, not the shell's working directory.
+Bundled defaults are loaded relative to `ceetex.py`. To override them without editing
+the checkout, put custom `pages.json`, `settings.json` and `fasttext.json`
+in the OS-specific user configuration directory. Run
+`python -c "from platformdirs import user_config_dir; print(user_config_dir('ceetex', appauthor=False))"`
+to find it. User overrides take priority; invalid JSON falls back to bundled defaults.
+
+See [the full controls reference](docs/CONTROLS.md) for all key bindings, status indicators and configuration options.
 
 ## Using CEETEX
 

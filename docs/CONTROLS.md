@@ -105,6 +105,21 @@ Copy `settings.example.json` to `settings.json`. Example:
 `settings.json`. Automatic rotation affects headline subpages, not articles
 or the directory.
 
+## Configuration location
+
+To place custom channels and settings outside the project checkout, use
+your **per-user CEETEX configuration directory**, as reported by:
+
+```sh
+python -c "from platformdirs import user_config_dir; print(user_config_dir('ceetex', appauthor=False))"
+```
+
+Copy your custom `pages.json`, `fasttext.json` and `settings.json`
+there. CEETEX checks this directory first, then falls back to files next to
+`ceetex.py`. The bundled `pages.json` is therefore still a usable default.
+Invalid user JSON displays a warning and falls back to the bundled file.
+Launching from another working directory does not change the lookup order.
+
 ## Troubleshooting
 
 If function keys are intercepted by your terminal, click the corresponding

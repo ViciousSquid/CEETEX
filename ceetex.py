@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+from platformdirs import user_config_dir
+
 import feedparser
 from rich.cells import set_cell_size
 from rich.markup import escape
@@ -30,6 +32,29 @@ CLASSIC_PAGE_SIZE = 9
 RESPONSIVE_PAGE_SIZE = 15
 AUTO_ROTATE_SECONDS = 10
 STALE_SECONDS = 15 * 60
+
+
+def config_locations(filename: str) -> tuple[Path, Path]:
+    """User overrides take precedence over the bundled project defaults."""
+    user_file = Path(user_config_dir("ceetex", appauthor=False)) / filename
+    return user_file, ROOT / filename
+
+
+def read_json_config(filename: str, fallback: dict, warnings: list[str] | None = None) -> dict:
+    """Read a JSON mapping, falling back to bundled config if user data is invalid."""
+    for path in dict.fromkeys(config_locations(filename)):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("configuration must be a JSON object")
+            return data
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, TypeError) as exc:
+            if warnings is not None:
+                warnings.append(f"{path}: {exc}")
+    return fallback.copy()
+
 
 CEETEX_LOGO = """
 [b white]█▀▀ █▀▀ █▀▀ ▀█▀ █▀▀ █ █[/b white]
@@ -92,6 +117,7 @@ class TeletextApp(App):
 
     def __init__(self) -> None:
         super().__init__()
+        self.config_warnings: list[str] = []
         self.pages = self.load_config()
         self.fasttext_pages = self.load_fasttext()
         self.settings = self.load_settings()
@@ -114,33 +140,29 @@ class TeletextApp(App):
         self.history_position = 0
 
     def load_config(self) -> dict:
-        path = ROOT / "pages.json"
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                raise ValueError("pages.json must be an object")
-            return data
-        except (OSError, ValueError, TypeError):
-            return {"100": ["INDEX", ""]}
+        data = read_json_config("pages.json", {"100": ["INDEX", ""]}, self.config_warnings)
+        pages = {}
+        for page_id, channel in data.items():
+            if not (
+                isinstance(page_id, str) and len(page_id) == 3
+                and page_id.isascii() and page_id.isdigit()
+                and isinstance(channel, list) and len(channel) == 2
+                and all(isinstance(part, str) for part in channel)
+            ):
+                self.config_warnings.append(f"pages.json: invalid channel {page_id!r}")
+                continue
+            pages[page_id] = channel
+        pages["100"] = ["INDEX", ""]
+        return pages
 
     def load_fasttext(self) -> dict[str, str]:
-        try:
-            overrides = json.loads((ROOT / "fasttext.json").read_text(encoding="utf-8"))
-            if not isinstance(overrides, dict):
-                overrides = {}
-        except (OSError, ValueError):
-            overrides = {}
+        overrides = read_json_config("fasttext.json", {}, self.config_warnings)
         return validate_fasttext(overrides, self.pages, FASTTEXT_DEFAULTS)
 
     @staticmethod
     def load_settings() -> dict:
         """Optional runtime defaults; toggles don't rewrite the user's config."""
-        try:
-            data = json.loads((ROOT / "settings.json").read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                data = {}
-        except (OSError, ValueError):
-            data = {}
+        data = read_json_config("settings.json", {})
         seconds = data.get("rotation_seconds", AUTO_ROTATE_SECONDS)
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 2 <= seconds <= 300:
             seconds = AUTO_ROTATE_SECONDS
@@ -171,6 +193,8 @@ class TeletextApp(App):
         self.query_one("#dialer", Input).focus()
         self.display_index()
         self._clock_timer = self.set_interval(1.0, self._tick)
+        for issue in self.config_warnings:
+            self.notify(f"Config warning: {issue}", severity="warning")
 
     def on_unmount(self) -> None:
         if hasattr(self, "_clock_timer"):

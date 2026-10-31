@@ -228,3 +228,56 @@ async def test_malicious_feed_markups_stay_plain_text_in_views():
             # The summary parser must remove embedded scripts but retain
             # literal Rich-formatting strings as ordinary text.
             assert "INJECT" not in str(app.query_one("#article_view", Static).render())
+
+
+def test_user_configuration_overrides_bundled_files_regardless_of_cwd(tmp_path, monkeypatch):
+    import json
+    bundle = tmp_path / "bundle"
+    user = tmp_path / "user-config"
+    other = tmp_path / "other"
+    bundle.mkdir()
+    user.mkdir()
+    other.mkdir()
+
+    (bundle / "pages.json").write_text(json.dumps({
+        "100": ["INDEX", ""], "101": ["BUNDLED NEWS", "https://example.org/bundled"],
+        "130": ["SPORT", "https://example.org/sport"]}), encoding="utf-8")
+    (user / "pages.json").write_text(json.dumps({
+        "101": ["USER NEWS", "https://example.org/user"],
+        "102": ["LOCAL WEATHER", "https://example.org/weather"],
+        "130": ["SPORT", "https://example.org/sport"]}), encoding="utf-8")
+    (user / "fasttext.json").write_text('{"red": "102"}', encoding="utf-8")
+    (user / "settings.json").write_text(
+        '{"classic_mode": true, "auto_subpages": true, "rotation_seconds": 7}', encoding="utf-8")
+
+    monkeypatch.setattr("ceetex.ROOT", bundle)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(user))
+    monkeypatch.chdir(other)
+    app = TeletextApp()
+    assert app.pages["101"][0] == "USER NEWS"
+    assert app.pages["100"] == ["INDEX", ""]
+    assert app.fasttext_pages["red"] == "102"
+    assert app.classic_mode and app.auto_rotate and app.rotation_seconds == 7
+
+    (user / "pages.json").write_text("{BROKEN", encoding="utf-8")
+    fallback = TeletextApp()
+    assert fallback.pages["101"][0] == "BUNDLED NEWS"
+    assert fallback.config_warnings
+    (user / "pages.json").unlink()
+    assert TeletextApp().pages["101"][0] == "BUNDLED NEWS"
+
+
+def test_invalid_config_entries_cannot_break_index(tmp_path, monkeypatch):
+    import json
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "pages.json").write_text(json.dumps({
+        "100": ["INDEX", ""], "101": ["VALID", "https://example.org"],
+        "banana": ["BAD", ""], "١٢٣": ["BAD", ""],
+        "102": "not-a-channel", "103": ["missing url"]
+    }), encoding="utf-8")
+    monkeypatch.setattr("ceetex.ROOT", bundle)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    app = TeletextApp()
+    assert sorted(app.pages) == ["100", "101"]
+    assert len(app.config_warnings) == 4
