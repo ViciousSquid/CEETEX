@@ -159,3 +159,13 @@ The reading-state limits are 250 bookmarked stories and the most recent 5,000 re
 ## Newswire and offline behaviour
 
 P900 displays available cached headlines immediately and tries to refresh up to 24 configured feed sources with a maximum of three concurrent fetches. Stories are sorted by publish time where available, deduplicated by URL and tagged with their source page. It cannot show uncached stories when offline. P901 is built from locally saved articles and needs no network.
+
+## SSL certificate verification errors on macOS
+
+CEETEX verifies HTTPS certificates and server hostnames. Newer builds
+explicitly load the Mozilla CA bundle via `certifi`, combined with the
+interpreter's existing trusted roots. If P102 or another feed shows
+`CERTIFICATE_VERIFY_FAILED`, first update CEETEX, activate its virtual
+environment, and run `python -m pip install -r requirements.txt`.
+With python.org's macOS Python installation you may also need to run
+its `Install Certificates.command`. Do not disable HTTPS verification.
