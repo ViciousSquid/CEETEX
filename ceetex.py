@@ -545,6 +545,18 @@ class TeletextApp(App):
         self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
         self.fetching = False
         self.request_id += 1  # invalidate callbacks from older pages/requests
+        if state.page_id == "901":
+            self.render_feed("901", self.reading.bookmarked_entries(), "SAVED STORIES", self.request_id)
+            if state.mode == "article" and 0 <= state.selected_entry < len(self.entries):
+                self.selected_entry = state.selected_entry
+                self._render_article()
+            return
+        if state.page_id == "900":
+            if self.entries and state.mode == "article" and 0 <= state.selected_entry < len(self.entries):
+                self._render_article()
+                return
+            self._show_newswire()
+            return
         if not self.entries:
             self._toggle_views(loading=True)
             self.fetching = True
@@ -559,6 +571,78 @@ class TeletextApp(App):
     def load_page(self, page_id: str) -> None:
         # Invalid pages must be navigable history states as well.
         self._navigate(PageState(page_id, "index" if page_id == "100" else "list"))
+
+    def _show_newswire(self) -> None:
+        """Show existing cached headlines immediately, then update online."""
+        sources = []
+        for page_id, (name, url) in list(self.pages.items()):
+            if not url:
+                continue
+            cached = self.feed_cache.get(page_id)
+            if cached is None:
+                saved = load_cached_feed(page_id)
+                if saved is not None and saved.url == url:
+                    cached = FeedSnapshot(saved.entries, saved.fetched_at, saved.source,
+                                          etag=saved.etag, last_modified=saved.last_modified)
+            if cached is not None:
+                sources.append((page_id, name, cached.entries))
+        combined = merge_feeds(sources)
+        if combined:
+            self.render_feed("900", combined, "CEETEX NEWSWIRE", self.request_id)
+        else:
+            self._toggle_views(loading=True)
+        self.fetching = True
+        self.fetch_wire(self.request_id)
+
+    @work(thread=True, group="newswire", exclusive=True)
+    def fetch_wire(self, request_id: int) -> None:
+        """Refresh up to 24 feeds concurrently, never blocking the event loop."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        sources = [
+            (page, name, url) for page, (name, url) in self.pages.items()
+            if url and page not in ("100", "900", "901")
+        ][:MAX_WIRE_SOURCES]
+
+        def download(channel):
+            page, name, url = channel
+            cached = self.feed_cache.get(page)
+            if cached is None:
+                persisted = load_cached_feed(page)
+                if persisted is not None and persisted.url == url:
+                    cached = FeedSnapshot(persisted.entries, persisted.fetched_at, persisted.source,
+                                          etag=persisted.etag, last_modified=persisted.last_modified)
+            try:
+                response = fetch_http_feed(url, etag=cached.etag if cached else None,
+                                           last_modified=cached.last_modified if cached else None)
+                if response.not_modified:
+                    if cached is None:
+                        return None
+                    entries = cached.entries
+                else:
+                    parsed = feedparser.parse(response.body)
+                    entries = list(parsed.entries)
+                if not entries:
+                    return (page, name, cached.entries) if cached else None
+                if not response.not_modified:
+                    save_cached_feed(page, entries, time.time(), name, url,
+                                     response.etag, response.last_modified)
+                return (page, name, entries)
+            except Exception:
+                return (page, name, cached.entries) if cached else None
+
+        completed = []
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            jobs = [pool.submit(download, source) for source in sources]
+            for future in as_completed(jobs):
+                result = future.result()
+                if result is not None:
+                    completed.append(result)
+        combined = merge_feeds(completed)
+        if combined:
+            self.call_from_thread(self.render_feed, "900", combined, "CEETEX NEWSWIRE", request_id)
+        else:
+            self.call_from_thread(self.show_error, "900", "NO NEWSWIRE FEEDS AVAILABLE", request_id)
 
     @work(thread=True, exclusive=True)
     def fetch_feed(self, page_id: str, url: str, request_id: int) -> None:
@@ -850,6 +934,15 @@ class TeletextApp(App):
 
     def action_refresh(self) -> None:
         if self.current_page_id == "100" or self.current_page_id not in self.pages:
+            return
+        if self.current_page_id == "901":
+            self.request_id += 1
+            self.render_feed("901", self.reading.bookmarked_entries(), "SAVED STORIES", self.request_id)
+            return
+        if self.current_page_id == "900":
+            self.request_id += 1
+            self.fetching = True
+            self.fetch_wire(self.request_id)
             return
         self._refresh_article_key = (
             article_identity(self.entries[self.selected_entry])
