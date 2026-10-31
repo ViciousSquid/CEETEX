@@ -8,6 +8,7 @@ import pytest
 
 from ceetex_feed import (
     HTTP_TIMEOUT_SECONDS, MAX_FEED_BYTES, fetch_http_feed, verified_ssl_context,
+    describe_feed_error,
 )
 
 
@@ -104,3 +105,21 @@ def test_ssl_certificate_failure_is_not_silently_ignored():
     with patch("ceetex_feed.urlopen", side_effect=failure):
         with pytest.raises(URLError):
             fetch_http_feed("https://example.org/rss")
+
+
+def test_certificate_errors_have_clear_teletext_message():
+    from urllib.error import URLError
+    failure = URLError(ssl.SSLCertVerificationError("unable to get local issuer certificate"))
+    message = describe_feed_error(failure)
+    assert message.startswith("HTTPS CERTIFICATE ERROR")
+    assert "COULD NOT VERIFY" in message
+    assert len(message) <= 80
+    assert "urlopen" not in message
+
+
+def test_other_network_errors_retain_bounded_explanation():
+    from urllib.error import URLError
+    error = URLError("connection refused " + "x" * 500)
+    message = describe_feed_error(error)
+    assert message.startswith("CONNECTION ERROR:")
+    assert len(message) <= 180
