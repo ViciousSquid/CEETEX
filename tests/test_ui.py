@@ -281,3 +281,24 @@ def test_invalid_config_entries_cannot_break_index(tmp_path, monkeypatch):
     app = TeletextApp()
     assert sorted(app.pages) == ["100", "101"]
     assert len(app.config_warnings) == 4
+
+
+@pytest.mark.asyncio
+async def test_history_can_restore_invalid_page_without_fetch_or_crash():
+    calls = []
+    def no_fetch(self, page_id, url, request_id):
+        calls.append(page_id)
+
+    with patch.object(TeletextApp, "fetch_feed", no_fetch):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("999")
+            assert app.view_mode == "error"
+            await pilot.press("home")
+            assert app.current_page_id == "100"
+            await pilot.press("ctrl+left")
+            assert app.current_page_id == "999"
+            assert app.view_mode == "error"
+            await pilot.press("ctrl+right")
+            assert app.current_page_id == "100"
+            assert calls == []

@@ -336,6 +336,18 @@ class TeletextApp(App):
         if state.mode == "index" or state.page_id == "100":
             self.display_index()
             return
+        if state.page_id not in self.pages:
+            # Invalid page errors are navigable history states, not RSS feeds.
+            self.current_page_id = state.page_id
+            self.current_subpage = 0
+            self.selected_entry = -1
+            self.entries = []
+            self.view_mode = "error"
+            self.fetching = False
+            self.served_from_cache = False
+            self.request_id += 1
+            self.show_error(state.page_id, "PAGE DOES NOT EXIST", self.request_id)
+            return
         self.current_page_id = state.page_id
         self.current_subpage = state.subpage
         self.selected_entry = state.selected_entry
