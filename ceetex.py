@@ -23,6 +23,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
 from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text
+from ceetex_feed import fetch_http_feed
 
 ROOT = Path(__file__).resolve().parent
 FASTTEXT_DEFAULTS = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
@@ -70,6 +71,8 @@ class FeedSnapshot:
     fetched_at: float
     source: str
     offline: bool = False
+    etag: str | None = None
+    last_modified: str | None = None
 
 
 class TeletextApp(App):
@@ -386,16 +389,34 @@ class TeletextApp(App):
         else:
             self._navigate(PageState(page_id))
 
-    @work(thread=True)
+    @work(thread=True, exclusive=True)
     def fetch_feed(self, page_id: str, url: str, request_id: int) -> None:
+        """Fetch off the UI thread; outdated worker callbacks are discarded."""
         try:
-            feed = feedparser.parse(url)
+            cached = self.feed_cache.get(page_id)
+            result = fetch_http_feed(
+                url,
+                etag=cached.etag if cached is not None else None,
+                last_modified=cached.last_modified if cached is not None else None,
+            )
+            if result.not_modified:
+                if cached is None:
+                    raise ValueError("Received HTTP 304 without a cached feed")
+                self.call_from_thread(
+                    self.revalidate_feed, page_id, request_id,
+                    result.etag, result.last_modified,
+                )
+                return
+            feed = feedparser.parse(result.body)
             if not feed.entries:
                 self.call_from_thread(self.show_error, page_id, "NO DATA RECEIVED ON THIS CHANNEL", request_id)
                 return
             entries = list(feed.entries)
             source = str(feed.feed.get("title", self.pages[page_id][0]))
-            self.call_from_thread(self.render_feed, page_id, entries, source, request_id)
+            self.call_from_thread(
+                self.render_feed, page_id, entries, source, request_id,
+                result.etag, result.last_modified,
+            )
         except Exception as exc:
             self.call_from_thread(self.show_error, page_id, f"CONNECTION ERROR: {exc}", request_id)
 
@@ -403,10 +424,38 @@ class TeletextApp(App):
         """Only the currently displayed page's newest request may update UI."""
         return page_id == self.current_page_id and request_id == self.request_id
 
-    def render_feed(self, page_id: str, entries: list, source: str, request_id: int) -> None:
+    def revalidate_feed(
+        self, page_id: str, request_id: int,
+        etag: str | None, last_modified: str | None,
+    ) -> None:
+        """An HTTP 304 confirms cached entries are still current."""
         if not self._request_matches(page_id, request_id):
             return
-        self.feed_cache[page_id] = FeedSnapshot(entries, time.time(), source)
+        cached = self.feed_cache.get(page_id)
+        if cached is None:
+            self.show_error(page_id, "NO CACHED FEED TO REVALIDATE", request_id)
+            return
+        cached.fetched_at = time.time()
+        cached.offline = False
+        cached.etag = etag or cached.etag
+        cached.last_modified = last_modified or cached.last_modified
+        self.entries = cached.entries
+        self.fetching = False
+        self.served_from_cache = True
+        if self.view_mode == "article" and 0 <= self.selected_entry < len(self.entries):
+            self._render_article()
+        else:
+            self._render_list()
+
+    def render_feed(
+        self, page_id: str, entries: list, source: str, request_id: int,
+        etag: str | None = None, last_modified: str | None = None,
+    ) -> None:
+        if not self._request_matches(page_id, request_id):
+            return
+        self.feed_cache[page_id] = FeedSnapshot(
+            entries, time.time(), source, etag=etag, last_modified=last_modified,
+        )
         self.entries = entries
         self.fetching = False
         self.served_from_cache = False
