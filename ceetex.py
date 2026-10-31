@@ -25,6 +25,10 @@ from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text, article_identity
 from ceetex_feed import fetch_http_feed
 from ceetex_cache import load_feed as load_cached_feed, save_feed as save_cached_feed
+from ceetex_classic import INDEX_PER_PAGE, compose_classic
+from ceetex_newswire import MAX_WIRE_SOURCES, merge_feeds
+from ceetex_reading import ReadingState
+from ceetex_teletext import COLUMNS, ROWS
 
 ROOT = Path(__file__).resolve().parent
 FASTTEXT_DEFAULTS = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
@@ -108,6 +112,20 @@ class DialingListView(ListView):
             event.stop()
 
 
+class ClassicTeletextScreen(Static):
+    """Keyboard and mouse navigation on the exact 40x25 Teletext surface."""
+    can_focus = True
+
+    def on_key(self, event) -> None:
+        if event.key in ("up", "down", "enter"):
+            self.app.classic_key(event.key)
+            event.prevent_default()
+            event.stop()
+
+    def on_click(self, event) -> None:
+        self.app.classic_click(event.offset.x, event.offset.y)
+
+
 class TeletextApp(App):
     BINDINGS = [
         Binding("escape", "back_to_list", "Back/Index", priority=True),
@@ -119,7 +137,12 @@ class TeletextApp(App):
         Binding("n", "next_subpage", "Next page", priority=True),
         Binding("p", "previous_subpage", "Previous page", priority=True),
         Binding("a", "toggle_auto_rotate", "Auto subpages", priority=True),
-        Binding("m", "toggle_classic", "40 columns", priority=True),
+        Binding("m", "toggle_classic", "Classic Teletext", priority=True),
+        Binding("g", "newswire", "News wire", priority=True),
+        Binding("k", "bookmarks", "Saved stories", priority=True),
+        Binding("b", "bookmark", "Save story", priority=True),
+        Binding("v", "reveal", "Reveal concealed text", priority=True),
+        Binding("h", "hold", "Hold page", priority=True),
         Binding("ctrl+left", "history_back", "Back", show=False, priority=True),
         Binding("ctrl+right", "history_forward", "Forward", show=False, priority=True),
         Binding("r", "refresh", "Refresh", priority=True),
@@ -149,6 +172,13 @@ class TeletextApp(App):
     #loading_msg { color: #ffff00; text-style: blink; margin: 2; }
     #article_scroll { height: 1fr; width: 100%; overflow-y: auto; }
     #article_view { padding: 1 1; }
+    #classic_page { width: 40; height: 25; background: #000000; padding: 0; margin: 0; }
+    #teletext_screen.classic #page_header,
+    #teletext_screen.classic #sub_header,
+    #teletext_screen.classic #ticker_tape,
+    #teletext_screen.classic #fasttext_bar,
+    #teletext_screen.classic #dialer { display: none; }
+    #teletext_screen.classic #teletext_container { height: 25; width: 40; }
     """
 
     def __init__(self) -> None:
@@ -178,6 +208,13 @@ class TeletextApp(App):
         self.history_position = 0
         self._refresh_article_key: str | None = None
         self._dial_digits = ""
+        self.reading = ReadingState.load()
+        self.reveal = False
+        self.hold_page = False
+        self._classic_index_page = 0
+        self._classic_index_selection = 0
+        self._classic_hits: dict[int, list[tuple[int, int, int]]] = {}
+        self._error_text = ""
 
     def load_config(self) -> dict:
         data = read_json_config("pages.json", {"100": ["INDEX", ""]}, self.config_warnings)
@@ -191,13 +228,15 @@ class TeletextApp(App):
             ):
                 self.config_warnings.append(f"pages.json: invalid channel {page_id!r}")
                 continue
-            if page_id != "100":
+            if page_id not in ("100", "900", "901"):
                 parsed = urlparse(channel[1])
                 if parsed.scheme.lower() not in ("http", "https") or not parsed.netloc or any(ch.isspace() for ch in channel[1]):
                     self.config_warnings.append(f"pages.json: invalid feed URL for {page_id}")
                     continue
             pages[page_id] = channel
         pages["100"] = ["INDEX", ""]
+        pages["900"] = ["NEWSWIRE", ""]
+        pages["901"] = ["BOOKMARKS", ""]
         return pages
 
     def load_fasttext(self) -> dict[str, str]:
@@ -232,6 +271,7 @@ class TeletextApp(App):
             yield Static("", id="sub_header", markup=False)
             with Container(id="teletext_container"):
                 yield Static(" DIRECTORY", id="directory_header", classes="hidden")
+                yield ClassicTeletextScreen("", id="classic_page", classes="hidden")
                 yield DialingListView(id="main_list")
                 yield Static(" [blink]LOADING DATA...[/blink]", id="loading_msg", classes="hidden")
                 with VerticalScroll(id="article_scroll", classes="hidden"):
