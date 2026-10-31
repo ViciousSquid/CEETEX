@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ssl
 from threading import BoundedSemaphore
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
@@ -33,6 +33,14 @@ def verified_ssl_context() -> ssl.SSLContext:
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=certifi.where())
     return context
+
+
+def describe_feed_error(exc: Exception) -> str:
+    """Return a concise on-screen error without obscuring TLS problems."""
+    reason = exc.reason if isinstance(exc, URLError) else exc
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return "HTTPS CERTIFICATE ERROR - COULD NOT VERIFY SOURCE (SEE HELP)"
+    return f"CONNECTION ERROR: {str(exc)[:160]}"
 
 
 @dataclass(frozen=True)
