@@ -45,7 +45,13 @@ def next_subpage(current: int, total: int, offset: int) -> int:
 
 def validate_fasttext(config: dict, pages: dict, defaults: dict[str, str]) -> dict[str, str]:
     """Allow only existing 3-digit pages as FastText destinations."""
-    result = defaults.copy()
+    available = sorted(
+        page for page in pages
+        if isinstance(page, str) and page != "100"
+        and len(page) == 3 and page.isascii() and page.isdigit()
+    )
+    fallback = available[0] if available else "100"
+    result = {colour: page if page in pages else fallback for colour, page in defaults.items()}
     for colour in defaults:
         candidate = config.get(colour, result[colour])
         if isinstance(candidate, str) and len(candidate) == 3 and candidate.isascii() and candidate.isdigit() and candidate in pages:
