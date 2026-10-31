@@ -10,7 +10,7 @@ from datetime import datetime
 import textwrap
 
 from ceetex_core import clean_feed_text
-from ceetex_teletext import TeletextGrid
+from ceetex_teletext import TeletextGrid, draw_mode7_row
 
 INDEX_ROWS = 16
 INDEX_PER_PAGE = INDEX_ROWS * 2
@@ -94,6 +94,26 @@ def compose_classic(
                            bg="blue" if is_selected else "black")
             hits.setdefault(row, []).append((0, 40, global_index))
         grid.write(0, 22, f"P{page_id}/{current_subpage+1}  ENTER READ  N/P PAGES", fg="yellow")
+    elif mode == "help":
+        grid.write(1, 5, "YOUR CEETEX QUICK GUIDE", fg="yellow")
+        for y, text in enumerate((
+            "100  MAIN DIRECTORY",
+            "900  LIVE NEWSWIRE",
+            "901  SAVED STORIES",
+            "0-9  DIAL THREE DIGITS",
+            "F1-4 FASTTEXT  N/P SUBPAGES",
+            "UP/DOWN SELECT, ENTER READ",
+            "B SAVE STORY  O OPEN WEB",
+            "V REVEAL TEXT  H HOLD PAGE",
+        ), start=7):
+            grid.write(1, y, text, fg="cyan" if y % 2 else "white")
+        # A genuine Mode 7 control-code row demonstrates changing per-cell
+        # colours, held mosaics and special graphics attributes.
+        draw_mode7_row(grid, 17, bytes([0x11, 0x7F, 0x1E, 0x7F, 0x7F,
+                                        0x12, 0x7F, 0x7F, 0x1F]))
+        grid.write(1, 19, "V REVEALS THE SECRET BELOW:", fg="yellow")
+        grid.write(1, 20, "THE MAP IS THE PROGRAM", fg="cyan", conceal=True)
+        grid.write(0, 22, "CEETEX • MODERN NEWS, CLASSIC FEEL", fg="green")
     elif mode == "article" and 0 <= selected_index < len(entries):
         entry = entries[selected_index]
         heading = clean_feed_text(entry.get("title") or "UNTITLED").upper()
