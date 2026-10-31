@@ -146,6 +146,8 @@ class TeletextApp(App):
         self.fasttext_pages = self.load_fasttext()
         self.settings = self.load_settings()
         self.rotation_seconds = self.settings["rotation_seconds"]
+        self.auto_refresh_seconds = self.settings["auto_refresh_seconds"]
+        self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
         self.feed_cache: dict[str, FeedSnapshot] = {}
         self.entries: list = []
         self.displayed_indices: list[int] = []
@@ -200,8 +202,14 @@ class TeletextApp(App):
         for key in ("auto_subpages", "classic_mode"):
             if key in data and not isinstance(data[key], bool):
                 self.config_warnings.append(f"settings.json: {key} must be a boolean")
+        refresh = data.get("auto_refresh_seconds", 0)
+        if (isinstance(refresh, bool) or not isinstance(refresh, (int, float))
+                or (refresh != 0 and not 60 <= refresh <= 3600)):
+            self.config_warnings.append("settings.json: auto_refresh_seconds must be 0 or 60 to 3600")
+            refresh = 0
         return {
             "rotation_seconds": seconds,
+            "auto_refresh_seconds": refresh,
             "auto_subpages": data.get("auto_subpages") is True,
             "classic_mode": data.get("classic_mode") is True,
         }
@@ -268,6 +276,13 @@ class TeletextApp(App):
         except NoMatches:
             # The timer can be scheduled just as Textual dismantles the screen.
             return
+        if (
+            self.auto_refresh_seconds and not self.fetching
+            and self.view_mode in ("list", "article")
+            and self.current_page_id != "100"
+            and time.monotonic() >= self.next_auto_refresh
+        ):
+            self.action_refresh()
         if self.auto_rotate and self.view_mode == "list" and time.monotonic() >= self.next_rotation:
             self.next_rotation = time.monotonic() + self.rotation_seconds
             self._change_subpage(1, record_history=False)
@@ -401,6 +416,7 @@ class TeletextApp(App):
         self.entries = self.feed_cache[state.page_id].entries if self.served_from_cache else []
         self.view_mode = state.mode
         self.next_rotation = time.monotonic() + self.rotation_seconds
+        self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
         self.fetching = False
         self.request_id += 1  # invalidate callbacks from older pages/requests
         if not self.entries:
@@ -695,7 +711,12 @@ class TeletextApp(App):
         )
         self.request_id += 1
         self.fetching = True
-        self._toggle_views(loading=True)
+        self.next_auto_refresh = time.monotonic() + self.auto_refresh_seconds if self.auto_refresh_seconds else float("inf")
+        if self.current_page_id in self.feed_cache:
+            # Retain readable cached headlines/article while revalidating.
+            self._update_sub_header()
+        else:
+            self._toggle_views(loading=True)
         self.fetch_feed(self.current_page_id, self.pages[self.current_page_id][1], self.request_id)
 
     def action_open_browser(self) -> None:
