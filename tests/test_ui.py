@@ -11,6 +11,14 @@ from ceetex import TeletextApp, STALE_SECONDS
 from textual.widgets import ListView
 
 
+@pytest.fixture(autouse=True)
+def isolated_feed_disk_cache(tmp_path, monkeypatch):
+    """Ensure headless interaction tests do not share persistent feed state."""
+    monkeypatch.setattr(
+        "ceetex_cache.user_cache_dir", lambda *a, **kw: str(tmp_path / "cache"),
+    )
+
+
 def fixture_entries(count=24):
     return [{"title": f"Headline {i} [yellow]", "summary": f"Summary {i}", "link": f"https://example.org/{i}"} for i in range(count)]
 
@@ -447,3 +455,23 @@ async def test_classic_viewport_is_40_by_25_cells_when_terminal_allows():
             await pilot.pause()
             assert frame.size.width == 100
             assert frame.size.height == 35
+
+
+@pytest.mark.asyncio
+async def test_persisted_feed_restores_without_fetch_after_app_restart():
+    calls = []
+    def no_fetch(self, page_id, url, request_id):
+        calls.append(page_id)
+
+    with patch.object(TeletextApp, "fetch_feed", no_fetch):
+        first = TeletextApp()
+        async with first.run_test():
+            first.load_page("500")
+            first.render_feed("500", fixture_entries(3), "HN", first.request_id)
+        second = TeletextApp()
+        async with second.run_test():
+            second.load_page("500")
+            assert second.view_mode == "list"
+            assert second.entries[0]["title"].startswith("Headline")
+            assert second._signal() == "CACHED"
+        assert calls == ["500"]
