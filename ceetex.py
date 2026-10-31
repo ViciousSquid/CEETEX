@@ -83,6 +83,7 @@ class TeletextApp(App):
     #fasttext_green { background: #006600; color: white; }
     #fasttext_yellow { background: #aaaa00; color: black; }
     #fasttext_cyan { background: #008888; color: white; }
+    #directory_header { height: 1; padding: 0 1; color: yellow; text-style: bold; }
     #dialer { width: 100%; height: 1; background: #000000; color: #ffffff; border: none; padding: 0 1; }
     .hidden { display: none; }
     #loading_msg { color: #ffff00; text-style: blink; margin: 2; }
@@ -99,7 +100,7 @@ class TeletextApp(App):
         self.feed_cache: dict[str, FeedSnapshot] = {}
         self.entries: list = []
         self.displayed_indices: list[int] = []
-        self.index_mapping: list[str | None] = []
+        self.index_mapping: list[str] = []
         self.current_page_id = "100"
         self.view_mode = "index"
         self.current_subpage = 0
@@ -155,6 +156,7 @@ class TeletextApp(App):
             yield Static("", id="page_header", markup=True)
             yield Static("", id="sub_header", markup=False)
             with Container(id="teletext_container"):
+                yield Static(" DIRECTORY", id="directory_header", classes="hidden")
                 yield ListView(id="main_list")
                 yield Static(" [blink]LOADING DATA...[/blink]", id="loading_msg", classes="hidden")
                 with VerticalScroll(id="article_scroll", classes="hidden"):
@@ -249,6 +251,7 @@ class TeletextApp(App):
 
     def _toggle_views(self, *, list_view=False, article=False, loading=False) -> None:
         self.query_one("#main_list").set_class(not list_view, "hidden")
+        self.query_one("#directory_header").set_class(not (list_view and self.view_mode == "index"), "hidden")
         self.query_one("#article_scroll").set_class(not article, "hidden")
         self.query_one("#loading_msg").set_class(not loading, "hidden")
         self.update_header()
@@ -264,19 +267,23 @@ class TeletextApp(App):
         self.index_mapping = []
         lst = self.query_one("#main_list", ListView)
         lst.clear()
-        lst.append(ListItem(Label("[b yellow] DIRECTORY[/b yellow]", markup=True)))
-        self.index_mapping.append(None)
-        for page in sorted((p for p in self.pages if p != "100" and p.isdigit()), key=int):
+        for page in sorted(
+            (p for p in self.pages if isinstance(p, str) and p != "100"
+             and len(p) == 3 and p.isascii() and p.isdigit()),
+            key=int,
+        ):
             name = str(self.pages[page][0]).upper()
             label_width = max(5, self.content_width - 6)
-            # One selectable item per channel: both columns in the old index
-            # previously mapped to only the left-hand page.
+            # Every selectable row corresponds to exactly one page ID.
             name = textwrap.shorten(name, width=label_width, placeholder="…")
             dots = "." * max(2, label_width - len(name))
             line = f" [white]{escape(name)}[/white] [yellow]{dots}[/yellow] [cyan]{page}[/cyan]"
             lst.append(ListItem(Label(line, markup=True)))
             self.index_mapping.append(page)
         self._toggle_views(list_view=True)
+        if self.index_mapping:
+            lst.index = 0
+        lst.focus()
 
     def _capture_state(self) -> PageState:
         if self.view_mode == "list":

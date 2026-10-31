@@ -96,3 +96,26 @@ def test_optional_settings_defaults_and_validation(tmp_path):
         app = TeletextApp()
         assert app.classic_mode is False
         assert app.rotation_seconds == 10
+
+
+@pytest.mark.asyncio
+async def test_every_directory_entry_is_selectable_including_last_column():
+    """The old two-column index could only open its left-hand pages."""
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            expected = sorted((p for p in app.pages if p != "100"), key=int)
+            assert app.index_mapping == expected
+            view = app.query_one("#main_list", ListView)
+            assert len(view.children) == len(expected)
+            for target in (expected[0], expected[len(expected)//2], expected[-1]):
+                view.index = app.index_mapping.index(target)
+                view.focus()
+                await pilot.press("enter")
+                assert app.current_page_id == target
+                await pilot.press("home")
+                assert app.current_page_id == "100"
+                view = app.query_one("#main_list", ListView)
+            assert app.query_one("#directory_header").display
+            await pilot.press("f1")
+            assert not app.query_one("#directory_header").display
