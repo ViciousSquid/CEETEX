@@ -371,9 +371,9 @@ async def test_refresh_keeps_story_identity_when_feed_reorders_or_removes_it():
             await pilot.press("enter")
             assert app.selected_entry == 1
             app.action_refresh()
-            app.render_feed("101", list(reversed(items)), "NEWS", app.request_id)
+            app.render_feed("101", [items[1], items[2], items[0]], "NEWS", app.request_id)
             assert app.view_mode == "article"
-            assert app.selected_entry == 1
+            assert app.selected_entry == 0
             app.action_refresh()
             app.render_feed("101", [items[0], items[2]], "NEWS", app.request_id)
             assert app.view_mode == "list"
