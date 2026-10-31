@@ -20,6 +20,7 @@ class CachedFeed:
     entries: list[dict[str, str]]
     fetched_at: float
     source: str
+    url: str
     etag: str | None
     last_modified: str | None
 
@@ -33,7 +34,7 @@ def _path(page_id: str) -> Path:
 
 def save_feed(
     page_id: str, entries: list, fetched_at: float, source: str,
-    etag: str | None = None, last_modified: str | None = None,
+    url: str, etag: str | None = None, last_modified: str | None = None,
 ) -> bool:
     """Write a bounded, JSON-only feed snapshot atomically.
 
@@ -49,6 +50,7 @@ def save_feed(
         "version": 1,
         "fetched_at": float(fetched_at),
         "source": str(source)[:MAX_FIELD_CHARS],
+        "url": url,
         "etag": etag,
         "last_modified": last_modified,
         "entries": compact,
@@ -94,6 +96,9 @@ def load_feed(page_id: str) -> CachedFeed | None:
             return None
         timestamp = data["fetched_at"]
         source = data["source"]
+        url = data["url"]
+        if not isinstance(url, str) or not url.startswith(("https://", "http://")):
+            return None
         if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)) or timestamp < 0:
             return None
         if not isinstance(source, str):
@@ -101,6 +106,6 @@ def load_feed(page_id: str) -> CachedFeed | None:
         etag, last_modified = data.get("etag"), data.get("last_modified")
         if not all(item is None or isinstance(item, str) for item in (etag, last_modified)):
             return None
-        return CachedFeed(entries, float(timestamp), source, etag, last_modified)
+        return CachedFeed(entries, float(timestamp), source, url, etag, last_modified)
     except (OSError, ValueError, TypeError, KeyError, OverflowError):
         return None
