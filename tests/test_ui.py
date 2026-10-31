@@ -352,7 +352,11 @@ async def test_dialled_channel_finishes_with_list_focus():
             )
             await pilot.press("1", "0", "1")
             await pilot.pause()
-            assert app.current_page_id == "101"
+            assert app.current_page_id == "101", (
+                app.query_one("#dialer").value,
+                app.focused.id if app.focused else None,
+                [(x.page_id, x.mode) for x in app.history],
+            )
             assert app.query_one("#main_list", ListView).has_focus
 
 
