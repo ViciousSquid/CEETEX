@@ -178,3 +178,27 @@ The `reading.json` file can be backed up or removed while CEETEX is closed. It i
 ## Classic Teletext keys
 
 The classic screen is navigable with **Up/Down/Enter**, click-to-select headlines and index entries, and the four clickable coloured FastText segments along the bottom. **N/P** steps between numbered headline subpages (or index directory subpages if you configure more than 32 channels). **H** holds automatic subpage rotation, and **V** reveals the concealed source field on article pages. While a feed is being fetched, the interface stays responsive; already cached articles remain accessible.
+
+## HTTPS certificate errors on macOS
+
+If a feed reports `SSL: CERTIFICATE_VERIFY_FAILED` or
+`unable to get local issuer certificate`, update to a CEETEX revision with
+the bundled `certifi` trust-store integration. The feed transport merges
+Python's trusted roots with the maintained Mozilla CA bundle and keeps
+certificate and hostname verification **enabled**.
+
+Activate the virtual environment, then install the updated dependencies:
+
+~~~sh
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python ceetex.py
+~~~
+
+If you're running Python from the official python.org macOS installer and
+HTTPS verification is still failing, you can also run the supplied
+`Install Certificates.command` from that Python installation's Applications
+folder. It configures Python's own trust roots. A certificate error after
+both steps may indicate an actual problem with the website's TLS certificate
+chain or a locally intercepted HTTPS connection; verify the site rather
+than setting `PYTHONHTTPSVERIFY=0`, disabling checks, or ignoring errors.
