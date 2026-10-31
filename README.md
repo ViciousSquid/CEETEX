@@ -16,7 +16,15 @@ python -m pip install -r requirements.txt
 python ceetex.py
 ~~~
 
-Bundled defaults are loaded relative to `ceetex.py`. To override them without editing
+Or install from the checkout and launch the `ceetex` command from any directory:
+
+~~~sh
+python -m pip install .
+ceetex
+~~~
+
+When running from source, bundled defaults are loaded relative to `ceetex.py`.
+Installed distributions carry the default channel directory as a package resource. To override them without editing
 the checkout, put custom `pages.json`, `settings.json` and `fasttext.json`
 in the OS-specific user configuration directory. Run
 `python -c "from platformdirs import user_config_dir; print(user_config_dir('ceetex', appauthor=False))"`
