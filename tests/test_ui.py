@@ -20,7 +20,7 @@ async def test_fasttext_keyboard_and_click():
     with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
         app = TeletextApp()
         async with app.run_test(size=(90, 30)) as pilot:
-            assert len(app.index_mapping) == len(app.pages)
+            assert len(app.index_mapping) == len(app.pages) - 1  # P100 is the index, not an entry
             await pilot.press("f1")
             assert app.current_page_id == "101"
             await pilot.click("#fasttext_green")
