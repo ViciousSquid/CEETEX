@@ -13,6 +13,15 @@ class PageState:
     selected_entry: int = -1  # index into the complete RSS feed
 
 
+def article_identity(entry: dict) -> str:
+    """Stable feed item identity across sorting and refreshes."""
+    for key in ("id", "guid", "link"):
+        value = entry.get(key)
+        if value:
+            return f"{key}:{value}"
+    return f"title:{entry.get('title', '')}|published:{entry.get('published', '')}"
+
+
 def page_count(item_count: int, page_size: int) -> int:
     if page_size <= 0:
         raise ValueError("page_size must be positive")
