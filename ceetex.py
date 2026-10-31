@@ -77,6 +77,8 @@ class FeedSnapshot:
 
 class TeletextApp(App):
     BINDINGS = [
+        *(Binding(str(digit), f"dial_digit('{digit}')", show=False, priority=True)
+          for digit in range(10)),
         Binding("escape", "back_to_list", "Back/Index", priority=True),
         Binding("home", "go_home", "Index", priority=True),
         Binding("f1", "fasttext('red')", "News", show=False, priority=True),
@@ -663,13 +665,13 @@ class TeletextApp(App):
         if urlparse(url).scheme in ("http", "https"):
             webbrowser.open(url)
 
-    def on_key(self, event) -> None:
-        if event.character and event.character.isascii() and event.character.isdigit():
-            dialer = self.query_one("#dialer", Input)
-            if not dialer.has_focus:
-                dialer.focus()
-                dialer.value += event.character
-                event.stop()
+    def action_dial_digit(self, digit: str) -> None:
+        """Capture numeric page input before list widgets consume the key."""
+        if len(digit) != 1 or digit not in "0123456789":
+            return
+        dialer = self.query_one("#dialer", Input)
+        dialer.focus()
+        dialer.value += digit
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "dialer":
