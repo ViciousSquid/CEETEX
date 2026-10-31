@@ -6,10 +6,13 @@ runs in CEETEX's background feed worker.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ssl
 from threading import BoundedSemaphore
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+import certifi
 
 MAX_FEED_BYTES = 2 * 1024 * 1024
 HTTP_TIMEOUT_SECONDS = 10
@@ -17,6 +20,19 @@ MAX_CONCURRENT_DOWNLOADS = 3
 _DOWNLOAD_SLOTS = BoundedSemaphore(MAX_CONCURRENT_DOWNLOADS)
 
 USER_AGENT = "CEETEX/1.0 (+https://github.com/ViciousSquid/CEETEX)"
+
+
+def verified_ssl_context() -> ssl.SSLContext:
+    """Combine the interpreter's trusted roots with Mozilla's CA bundle.
+
+    On some macOS Python installations the default CA search paths are
+    unpopulated. certifi supplies a maintained, cross-platform CA bundle.
+    Retaining the interpreter's roots also supports locally trusted
+    certificate authorities. Hostname verification remains mandatory.
+    """
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
+    return context
 
 
 @dataclass(frozen=True)
@@ -50,7 +66,11 @@ def fetch_http_feed(
 
     with _DOWNLOAD_SLOTS:
         try:
-            response = urlopen(request, timeout=HTTP_TIMEOUT_SECONDS)
+            response = urlopen(
+                request,
+                timeout=HTTP_TIMEOUT_SECONDS,
+                context=verified_ssl_context(),
+            )
         except HTTPError as exc:
             if exc.code != 304:
                 raise
