@@ -302,3 +302,125 @@ async def test_history_can_restore_invalid_page_without_fetch_or_crash():
             await pilot.press("ctrl+right")
             assert app.current_page_id == "100"
             assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_channel_is_a_real_history_entry():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(3), "NEWS", app.request_id)
+            app.load_page("999")
+            assert app.view_mode == "error"
+            await pilot.press("ctrl+left")
+            assert app.current_page_id == "101"
+            assert app.view_mode == "list"
+            await pilot.press("ctrl+right")
+            assert app.current_page_id == "999"
+            assert app.view_mode == "error"
+
+
+@pytest.mark.asyncio
+async def test_classic_mode_keeps_highlighted_global_article():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(40), "NEWS", app.request_id)
+            await pilot.press("n")
+            lst = app.query_one("#main_list", ListView)
+            lst.index = 3   # global article 18 on responsive subpage 2
+            await pilot.press("m")
+            assert app.classic_mode
+            assert app.current_subpage == 2
+            assert app.selected_entry == 18
+            assert lst.index == 0
+            await pilot.press("m")
+            assert not app.classic_mode
+            assert app.current_subpage == 1
+            assert lst.index == 3
+
+
+@pytest.mark.asyncio
+async def test_dialled_channel_finishes_with_list_focus():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.feed_cache["101"] = __import__("ceetex").FeedSnapshot(
+                fixture_entries(3), time.time(), "NEWS",
+            )
+            await pilot.press("1", "0", "1")
+            await pilot.pause()
+            assert app.current_page_id == "101"
+            assert app.query_one("#main_list", ListView).has_focus
+
+
+@pytest.mark.asyncio
+async def test_refresh_keeps_story_identity_when_feed_reorders_or_removes_it():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            items = [
+                {"id": f"guid-{i}", "title": f"Story {i}", "summary": "Text"}
+                for i in range(3)
+            ]
+            app.load_page("101")
+            app.render_feed("101", items, "NEWS", app.request_id)
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            assert app.selected_entry == 1
+            app.action_refresh()
+            app.render_feed("101", list(reversed(items)), "NEWS", app.request_id)
+            assert app.view_mode == "article"
+            assert app.selected_entry == 1
+            app.action_refresh()
+            app.render_feed("101", [items[0], items[2]], "NEWS", app.request_id)
+            assert app.view_mode == "list"
+            assert app.selected_entry == -1
+
+
+@pytest.mark.asyncio
+async def test_304_revalidation_preserves_open_story_and_clears_offline_flag():
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", fixture_entries(2), "NEWS", app.request_id, '"old"')
+            app.query_one("#main_list", ListView).index = 1
+            await pilot.press("enter")
+            app.feed_cache["101"].offline = True
+            app.action_refresh()
+            app.revalidate_feed("101", app.request_id, '"new"', None)
+            assert app.view_mode == "article"
+            assert app.selected_entry == 1
+            assert not app.feed_cache["101"].offline
+            assert app.feed_cache["101"].etag == '"new"'
+            assert app._signal() == "CACHED"
+
+
+def test_invalid_feed_url_ignored_with_warning(tmp_path, monkeypatch):
+    import json
+    (tmp_path / "pages.json").write_text(json.dumps({
+        "101": ["NEWS", "https://example.org/rss"],
+        "102": ["LOCAL", "file:///etc/passwd"],
+        "103": ["BROKEN", "javascript:alert(1)"],
+    }))
+    monkeypatch.setattr("ceetex.ROOT", tmp_path)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    app = TeletextApp()
+    assert sorted(app.pages) == ["100", "101"]
+    assert any("invalid feed URL" in msg for msg in app.config_warnings)
+    assert all(page in app.pages for page in app.fasttext_pages.values())
+
+
+def test_invalid_settings_generate_warnings(tmp_path, monkeypatch):
+    (tmp_path / "settings.json").write_text(
+        '{"auto_subpages": "yes", "classic_mode": 1, "rotation_seconds": -20}'
+    )
+    monkeypatch.setattr("ceetex.ROOT", tmp_path)
+    monkeypatch.setattr("ceetex.user_config_dir", lambda *a, **kw: str(tmp_path / "absent"))
+    app = TeletextApp()
+    assert len([w for w in app.config_warnings if "settings.json" in w]) == 3
+    assert not app.classic_mode and not app.auto_rotate
+    assert app.rotation_seconds == 10
