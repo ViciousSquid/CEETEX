@@ -62,13 +62,12 @@ def fetch_http_feed(
             if response.geturl() and urlsplit(response.geturl()).scheme.lower() not in ("http", "https"):
                 raise ValueError("Feed redirect must use HTTP or HTTPS")
             length = response.headers.get("Content-Length")
-            if length is not None:
-                try:
-                    if int(length) > MAX_FEED_BYTES:
-                        raise ValueError("Feed exceeds maximum download size")
-                except ValueError as exc:
-                    if "exceeds" in str(exc):
-                        raise
+            try:
+                declared_length = int(length) if length is not None else None
+            except (TypeError, ValueError):
+                declared_length = None
+            if declared_length is not None and declared_length > MAX_FEED_BYTES:
+                raise ValueError("Feed exceeds maximum download size")
             body = response.read(MAX_FEED_BYTES + 1)
             if len(body) > MAX_FEED_BYTES:
                 raise ValueError("Feed exceeds maximum download size")
