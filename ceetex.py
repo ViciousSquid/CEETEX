@@ -773,6 +773,8 @@ class TeletextApp(App):
             colour = "yellow" if saved else ("cyan" if unread else "white")
             lst.append(ListItem(Label(f"[{colour}]{glyph}[/{colour}] [white]{escape(title)}[/white]", markup=True)))
             self.displayed_indices.append(global_idx)
+        if self.classic_mode and self.displayed_indices and self.selected_entry not in self.displayed_indices:
+            self.selected_entry = self.displayed_indices[0]
         self._toggle_views(list_view=True)
         if self.selected_entry in self.displayed_indices:
             lst.index = self.displayed_indices.index(self.selected_entry)
