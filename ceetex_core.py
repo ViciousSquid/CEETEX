@@ -105,3 +105,49 @@ def mosaic_heading(title: str, width: int = 40) -> str:
                 bottom = bitmap[y * 2 + 1][x] == "#"
                 rows[y] += ("█" if top and bottom else "▀" if top else "▄" if bottom else " ")
     return "\n".join(rows)
+
+
+def clean_feed_text(value: object, *, html_content: bool = False) -> str:
+    """Convert untrusted RSS text to terminal-safe plain text.
+
+    HTML summaries retain meaningful text but discard markup, scripts, styles,
+    terminal escape/control sequences and invisible formatting characters.
+    Rendering code must still Rich-escape the returned text.
+    """
+    import html
+    import re
+    from html.parser import HTMLParser
+
+    class _SummaryHTML(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.fragments = []
+            self.ignored = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style"):
+                self.ignored.append(tag)
+            elif not self.ignored and tag in ("br", "p", "div", "li", "tr", "h1", "h2", "h3"):
+                self.fragments.append(" ")
+
+        def handle_endtag(self, tag):
+            if self.ignored:
+                if tag == self.ignored[-1]:
+                    self.ignored.pop()
+            elif tag in ("p", "div", "li", "tr", "h1", "h2", "h3"):
+                self.fragments.append(" ")
+
+        def handle_data(self, data):
+            if not self.ignored:
+                self.fragments.append(data)
+
+    raw = str(value) if value is not None else ""
+    # Remove escape sequences before collapsing control characters.
+    raw = re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~])?", "", raw)
+    if html_content:
+        parser = _SummaryHTML()
+        parser.feed(raw)
+        parser.close()
+        raw = " ".join(parser.fragments)
+    raw = html.unescape(raw)
+    return " ".join("".join(c for c in raw if c.isprintable() or c.isspace()).split())

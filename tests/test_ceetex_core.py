@@ -47,3 +47,13 @@ def test_mosaic_heading_is_two_rows_and_respects_column_limit():
         assert len(lines) == 2
         assert all(len(line) <= 40 for line in lines)
     assert "█" in mosaic_heading("A", 40)
+
+
+def test_plain_feed_text_removes_markup_scripts_controls_and_ansi():
+    from ceetex_core import clean_feed_text
+    assert clean_feed_text("&lt;NEWS&gt; [red]Hi[/red]") == "<NEWS> [red]Hi[/red]"
+    summary = '<p>Safe &amp; sound <b>[blue]text</b></p><script>NOPE</script><style>HIDE</style><p>More<br>lines</p>'
+    assert clean_feed_text(summary, html_content=True) == "Safe & sound [blue]text More lines"
+    assert clean_feed_text("ok\x1b[31mred\x1b[0m\u202e\x00") == "okred"
+    assert clean_feed_text(None) == ""
+    assert clean_feed_text("A < B and C > D") == "A < B and C > D"

@@ -1,9 +1,7 @@
 """CEETEX: RSS displayed as an interactive Teletext service."""
 from __future__ import annotations
 
-import html
 import json
-import re
 import textwrap
 import time
 import webbrowser
@@ -21,7 +19,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.widgets import Button, Input, Label, ListItem, ListView, Static
 
-from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading
+from ceetex_core import PageState, next_subpage, page_count, subpage_entries, validate_fasttext, mosaic_heading, clean_feed_text
 
 ROOT = Path(__file__).resolve().parent
 FASTTEXT_DEFAULTS = {"red": "101", "green": "130", "yellow": "102", "cyan": "190"}
@@ -385,10 +383,10 @@ class TeletextApp(App):
         lst = self.query_one("#main_list", ListView)
         lst.clear()
         self.displayed_indices = []
-        latest = escape(html.unescape(str(self.entries[0].get("title", "UNTITLED"))).upper())
+        latest = escape((clean_feed_text(self.entries[0].get("title")) or "UNTITLED").upper())
         self.query_one("#ticker_tape", Static).update(f" [b yellow]LATEST:[/b yellow] {latest}")
         for global_idx, entry in subpage_entries(self.entries, self.current_subpage, self.page_size):
-            title = html.unescape(str(entry.get("title", "UNTITLED"))).upper()
+            title = (clean_feed_text(entry.get("title")) or "UNTITLED").upper()
             title = textwrap.shorten(title, width=self.content_width, placeholder="…")
             lst.append(ListItem(Label(f"[cyan]█[/cyan] [white]{escape(title)}[/white]", markup=True)))
             self.displayed_indices.append(global_idx)
@@ -406,9 +404,11 @@ class TeletextApp(App):
             return
         self.view_mode = "article"
         entry = self.entries[self.selected_entry]
-        title = html.unescape(str(entry.get("title", "UNTITLED"))).upper()
-        summary = str(entry.get("summary", entry.get("description", "NO DETAILS PROVIDED.")))
-        summary = html.unescape(re.sub(r"<[^>]*>", "", summary))
+        title = (clean_feed_text(entry.get("title")) or "UNTITLED").upper()
+        summary = clean_feed_text(
+            entry.get("summary", entry.get("description", "NO DETAILS PROVIDED.")),
+            html_content=True,
+        ) or "NO DETAILS PROVIDED."
         width = self.content_width
         title = textwrap.fill(title, width=width)
         summary = textwrap.fill(summary, width=width)
@@ -433,7 +433,7 @@ class TeletextApp(App):
             return
         self.view_mode = "error"
         self.query_one("#article_view", Static).update(
-            f"\n[b red]{escape(message)}[/b red]\n\nCHECK SIGNAL AND RETRY (R)\nESC: INDEX"
+            f"\n[b red]{escape(clean_feed_text(message))}[/b red]\n\nCHECK SIGNAL AND RETRY (R)\nESC: INDEX"
         )
         self._toggle_views(article=True)
 

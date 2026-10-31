@@ -208,3 +208,23 @@ async def test_failed_article_refresh_keeps_article_visible_offline():
             assert app.view_mode == "article"
             assert app.selected_entry == 1
             assert app._signal() == "OFFLINE/CACHED"
+
+
+@pytest.mark.asyncio
+async def test_malicious_feed_markups_stay_plain_text_in_views():
+    from textual.widgets import Static
+    with patch.object(TeletextApp, "fetch_feed", lambda *_: None):
+        app = TeletextApp()
+        async with app.run_test() as pilot:
+            app.load_page("101")
+            app.render_feed("101", [{
+                "title": "[bold red]FAKE MARKUP[/bold red] &lt;real&gt;",
+                "summary": "<p>safe [reverse]text</p><script>INJECT</script>",
+                "link": "https://example.org/story",
+            }], "FIXTURE", app.request_id)
+            await pilot.press("enter")
+            assert app.view_mode == "article"
+            await pilot.pause()
+            # The summary parser must remove embedded scripts but retain
+            # literal Rich-formatting strings as ordinary text.
+            assert "INJECT" not in str(app.query_one("#article_view", Static).renderable)
